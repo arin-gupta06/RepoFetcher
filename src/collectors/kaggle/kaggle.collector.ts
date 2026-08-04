@@ -5,18 +5,21 @@ import {execFile} from "node:child_process";
 import { promisify } from "node:util";
 import {KaggleDatasetRecord} from "../../models/record.models"
 import {parse} from "csv-parse/sync";
-export async function collectKaggleRepositories(): Promise<Dataset[]> {
+
+export async function collectKaggleDatasets(): Promise<Dataset[]> {
   const datasetMap = new Map <string, Dataset>();
 
-  for (const query of KAGGLE_SEARCH_TERMS){
-    try {
+  for (const [category, queries] of Object.entries(KAGGLE_SEARCH_TERMS)) {
+    console.log(`\n===== ${category.toUpperCase()} =====`);
+
+    for (const query of queries) {
       const datasets = await searchDatasets(query);
-      for(const dataset of datasets){
-        datasetMap.set(dataset.id, dataset)
+
+      console.log(`"${query}" → ${datasets.length} datasets`);
+
+      for (const dataset of datasets) {
+        datasetMap.set(dataset.id, dataset);
       }
-    } catch (error) {
-      console.error(`Failed to collect datasets for ${query}`, error)
-      
     }
   }
   return Array.from(datasetMap.values());
@@ -24,16 +27,18 @@ export async function collectKaggleRepositories(): Promise<Dataset[]> {
 const execFileAsync = promisify(execFile);
 async function searchDatasets(query: string): Promise<Dataset[]>{
   try {
-    const {stdout} = await execFileAsync(
-      "kaggle",
-      [
-        "datasets",
-        "list",
-        "--search",
-        query,
-        "--csv"
-      ]
-    );
+    const { stdout } = await execFileAsync(
+    "kaggle",
+    [
+      "datasets",
+      "list",
+      "--search",
+      query,
+      "--page-size",
+      "200",
+      "--csv",
+    ]
+  );
     return parseDatasetCSV(stdout)
   } catch (error) {
     console.error(`Failed to search on Kaggle for ${query}`)

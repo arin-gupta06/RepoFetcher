@@ -1,9 +1,12 @@
-import { writeFile } from "node:fs/promises";
-import type { Repository } from "../models/repository.model";
+import { promises as fs } from "node:fs";
 
-export async function exportRepositoriesToJson(
-  repositories: Repository[],
-  outputPath: string,
+export async function exportToJson<T>(
+    data: T[],
+    filename: string,
 ): Promise<void> {
-  await writeFile(outputPath, JSON.stringify(repositories, null, 2));
+    await fs.writeFile(
+        filename,
+        JSON.stringify(data, null, 2),
+        "utf-8",
+    );
 }

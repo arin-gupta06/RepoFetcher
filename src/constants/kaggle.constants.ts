@@ -1,32 +1,36 @@
-export const KAGGLE_SEARCH_TERMS = [
-  "software engineering",
-  "software repository",
-  "source code",
-  "code repository",
+export const KAGGLE_SEARCH_TERMS = {
+  repositories: [
+    "github repositories",
+    "repository metadata",
+    "open source repositories",
+  ],
 
-  "github",
-  "github repositories",
-  "github projects",
+  sourceCode: [
+    "source code",
+    "python source code",
+    "java source code",
+    "javascript source code",
+  ],
 
-  "code summarization",
-  "code search",
-  "code clone detection",
-  "code generation",
+  documentation: [
+    "github readme",
+    "software documentation",
+    "technical documentation",
+  ],
 
-  "bug detection",
-  "vulnerability detection",
+  summarization: [
+    "code summarization",
+    "code comments",
+  ],
 
-  "documentation",
-  "readme",
+  security: [
+    "software defects",
+    "vulnerability dataset",
+    "cve",
+  ],
 
-  "architecture",
-  "uml",
-
-  "dependency graph",
-  "call graph"
-];
-
-export const KAGGLE_SEARCH_CONFIG = {
-  maxResultsPerQuery: 100,
-  sortBy: "votes"
-} as const;
+  issues: [
+    "github issues",
+    "pull request dataset",
+  ],
+};
