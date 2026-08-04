@@ -2,11 +2,11 @@
   "name": "repofetcher",
   "version": "1.0.0",
   "description": "data for the RepoLens",
-  "main": "dist/index.js",
+  "main": "src/index.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch",
-    "start": "node dist/index.js",
+    "dev": "tsc -p tsconfig.json --watch --noEmit",
+    "start": "node --loader ts-node/esm --experimental-specifier-resolution=node src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run typecheck"
   },
@@ -24,10 +24,12 @@
   "homepage": "https://github.com/arin-gupta06/RepoFetcher#readme",
   "dependencies": {
     "@octokit/rest": "^22.0.1",
+    "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
 }
