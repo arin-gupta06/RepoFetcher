@@ -1,4 +1,4 @@
-import type { Dataset } from "../models/datasets.models";
+import type { Dataset } from "../../models/datasets.models";
 
 export class DatasetStore {
   private readonly datasets = new Map<string, Dataset>();

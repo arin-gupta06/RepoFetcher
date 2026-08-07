@@ -14,6 +14,7 @@ export function mapGitHubRepository(repo: GitHubRepository): Repository {
     stars: repo.stargazers_count,
     forks: repo.forks_count,
     language: repo.language,
+    defaultBranch: repo.default_branch,
     owner: {
       login: repo.owner?.login ?? "",
       avatarUrl: repo.owner?.avatar_url ?? "",

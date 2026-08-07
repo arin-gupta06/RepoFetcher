@@ -1,5 +1,6 @@
 import { octokit } from "../../config/github";
 import type { Repository } from "../../models/repository.model";
+import { collectionStatistics } from "../../statistics/collection.statistics";
 import { mapGitHubRepository } from "./github.mapper";
 import {
   buildRepositorySearchQuery,
@@ -13,6 +14,8 @@ export async function collectGitHubRepositories(
     q: buildRepositorySearchQuery(language),
     ...githubRepositorySearchOptions,
   });
+
+  collectionStatistics.incrementRepositories(response.data.items.length);
 
   return response.data.items.map(mapGitHubRepository);
 }

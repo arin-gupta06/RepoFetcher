@@ -1,9 +1,11 @@
 import { collectResources } from "./collectors/collector.manager";
-import { exportToJson } from "./storage/json.exporter";
-import { RepositoryStore } from "./storage/repository.store";
-import { DatasetStore } from "./storage/dataset.store";
+import { appendToJson } from "./storage/json.exporter";
+import { RepositoryStore } from "./storage/repositories";
+import { DatasetStore } from "./storage/datasets";
 import { previewDatasets, previewRepositories } from "./utils/preview";
-import { ReadmeStore } from "./storage/readme.store";
+import { ReadmeStore } from "./storage/readmes";
+import { collectionStatistics } from "./statistics/collection.statistics";
+
 async function main() {
   const { repositories, datasets, readmes } = await collectResources();
 
@@ -15,14 +17,27 @@ async function main() {
   datasetStore.addMany(datasets);
   readmeStore.addMany(readmes)
 
-  await exportToJson(repositoryStore.getAll(), "repositories.json");
-  await exportToJson(datasetStore.getAll(), "datasets.json");
-  await exportToJson(readmeStore.getAll(), "readmes.json");
+  await appendToJson(
+    repositoryStore.getAll(),
+    "repositories.json",
+    (repository) => repository.id,
+  );
+  await appendToJson(
+    datasetStore.getAll(),
+    "datasets.json",
+    (dataset) => dataset.id,
+  );
+  await appendToJson(
+    readmeStore.getAll(),
+    "readmes.json",
+    (readme) => readme.repositoryId,
+  );
 
   console.log(`Fetched ${repositoryStore.getAll().length} repositories.`);
   console.log(`Fetched ${datasetStore.getAll().length} datasets.`);
   previewRepositories(repositories);
   previewDatasets(datasets);
+  collectionStatistics.printSummary();
 }
 
 main();

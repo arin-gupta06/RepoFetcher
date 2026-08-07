@@ -1,6 +1,8 @@
 import { RepositoryReadme } from "../../models/readme.models";
 import type { Repository } from "../../models/repository.model";
 import { octokit } from "../../config/github";
+import { collectionStatistics } from "../../statistics/collection.statistics";
+
 export async function collectRepositoryReadme(
   repository: Repository,
 ): Promise<RepositoryReadme | null> {
@@ -9,6 +11,8 @@ export async function collectRepositoryReadme(
       owner: repository.owner.login,
       repo: repository.name,
     })
+
+    collectionStatistics.incrementReadmes();
 
     return mapReadmeResponse(repository, response.data)
   } catch (error: any) {

@@ -1,4 +1,4 @@
-import { RepositoryReadme } from "../models/readme.models";
+import { RepositoryReadme } from "../../models/readme.models";
 
 export class ReadmeStore {
   private readonly readmes = new Map<number, RepositoryReadme>();

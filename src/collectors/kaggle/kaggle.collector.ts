@@ -5,6 +5,7 @@ import {execFile} from "node:child_process";
 import { promisify } from "node:util";
 import {KaggleDatasetRecord} from "../../models/record.models"
 import {parse} from "csv-parse/sync";
+import { collectionStatistics } from "../../statistics/collection.statistics";
 
 export async function collectKaggleDatasets(): Promise<Dataset[]> {
   const datasetMap = new Map <string, Dataset>();
@@ -18,6 +19,10 @@ export async function collectKaggleDatasets(): Promise<Dataset[]> {
       console.log(`"${query}" → ${datasets.length} datasets`);
 
       for (const dataset of datasets) {
+        if (!datasetMap.has(dataset.id)) {
+          collectionStatistics.incrementDatasets();
+        }
+
         datasetMap.set(dataset.id, dataset);
       }
     }
