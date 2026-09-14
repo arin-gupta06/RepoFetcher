@@ -1,4 +1,6 @@
-import { AssetResult } from "../services/assets";
+import type { AssetResult, SourceTier } from "../services/assets/asset.interface";
+import type { ArchitectureDoc } from "./architecture-doc.models";
+import type { StructuralFingerprint } from "./structural-fingerprint.models";
 
 export interface Repository {
     // Basic Information
@@ -19,7 +21,8 @@ export interface Repository {
         profileUrl: string;
     };
 
-    source: "github" | "kaggle";
+    source: "github" | "kaggle" | "curated";
+    sourceTier: SourceTier;
 
     topics: string[];
 
@@ -32,6 +35,8 @@ export interface Repository {
         sha?: string;
         size?: number;
     };
+    architectureDocs?: ArchitectureDoc[];
+    fingerprint?: StructuralFingerprint;
 
     images?: AssetResult[];
 

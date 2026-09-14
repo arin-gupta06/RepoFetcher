@@ -1,4 +1,4 @@
-import type { Repository } from "../../models/repository.model";
+import type { Repository } from "../../models/repository.models";
 
 export class RepositoryStore {
   private readonly repositories = new Map<number, Repository>();

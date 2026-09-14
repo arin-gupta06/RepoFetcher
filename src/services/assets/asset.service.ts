@@ -8,7 +8,9 @@ import {
     AssetMetadata,
     UploadRequest,
     UploadAsset,
+    SourceTier
 } from ".";
+import { PhashService } from "./phash.service";
 
 interface ImageDimensions {
     width: number;
@@ -126,6 +128,7 @@ export class AssetService {
                 .createHash("sha256")
                 .update(buffer)
                 .digest("hex"),
+            phash: PhashService.calculateGradientHash(buffer),
         };
     }
 
@@ -134,13 +137,35 @@ export class AssetService {
         uploadedAsset: UploadAsset,
         metadata: AssetMetadata
     ): AssetResult {
+        const sourceTier = request.sourceTier ?? "tier_4_public_pool";
+        const reliabilityScore = this.calculateReliabilityScore(sourceTier);
+        const diagramType = request.type === "diagram" ? "architecture_diagram" : "ui_screenshot";
 
         return {
             originalUrl: request.url,
+            sourceTier,
+            reliabilityScore,
+            diagramType,
+            context: request.context,
             uploadedAsset,
             metadata,
         };
     }
+
+    private calculateReliabilityScore(tier: SourceTier): number {
+        switch (tier) {
+            case "tier_1_template":
+                return 1.0;
+            case "tier_2_official":
+                return 0.95;
+            case "tier_3_verified_oss":
+                return 0.80;
+            case "tier_4_public_pool":
+            default:
+                return 0.50;
+        }
+    }
+
 
     private buildFileName(
         url: string

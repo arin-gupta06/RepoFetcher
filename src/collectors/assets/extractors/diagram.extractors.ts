@@ -1,124 +1,120 @@
-import { extractImages } from "./image.extractors";
+import type { DiagramContext } from "../../../services/assets/asset.interface";
+import {
+  extractImagesWithContext,
+  RepositoryContext,
+} from "./image.extractors";
 
-interface RepositoryContext {
-    owner: string;
-    repository: string;
-    branch: string;
+export interface ExtractedDiagramCandidate {
+  url: string;
+  context: DiagramContext;
 }
 
 const DIAGRAM_KEYWORDS = [
-    "architecture",
-    "diagram",
-    "system",
-    "design",
-    "uml",
-    "flow",
-    "flowchart",
-    "workflow",
-    "pipeline",
-    "schema",
-    "erd",
-    "sequence",
-    "component",
-    "deployment",
-    "topology",
+  "architecture",
+  "diagram",
+  "system",
+  "design",
+  "uml",
+  "flow",
+  "flowchart",
+  "workflow",
+  "pipeline",
+  "schema",
+  "erd",
+  "sequence",
+  "component",
+  "deployment",
+  "topology",
 ];
 
 const DIAGRAM_FOLDERS = [
-    "architecture",
-    "diagram",
-    "diagrams",
-    "uml",
-    "flowcharts",
+  "architecture",
+  "diagram",
+  "diagrams",
+  "uml",
+  "flowcharts",
 ];
 
-const MERMAID_REGEX =
-    /```mermaid\s*([\s\S]*?)```/gi;
+const MERMAID_REGEX = /```mermaid\s*([\s\S]*?)```/gi;
+
+export function extractDiagramsWithContext(
+  markdown: string,
+  repoContext: RepositoryContext
+): ExtractedDiagramCandidate[] {
+  const candidates: ExtractedDiagramCandidate[] = [];
+
+  // 1. Extract markdown/HTML images and check if they live in architecture sections or have diagram keywords
+  const extractedImages = extractImagesWithContext(markdown, repoContext);
+  for (const item of extractedImages) {
+    if (isDiagramAsset(item.url, item.context)) {
+      candidates.push(item);
+    }
+  }
+
+  // 2. Extract native Mermaid code blocks
+  let match: RegExpExecArray | null;
+  while ((match = MERMAID_REGEX.exec(markdown)) !== null) {
+    const rawMermaid = match[1].trim();
+    if (rawMermaid) {
+      const encoded = Buffer.from(rawMermaid, "utf8").toString("base64url");
+      const renderedUrl = `https://mermaid.ink/img/${encoded}?type=png&bgColor=!white`;
+
+      candidates.push({
+        url: renderedUrl,
+        context: {
+          sectionHeading: findPrecedingHeading(markdown, match.index),
+          surroundingText: null,
+          altText: "Mermaid Code Architecture Diagram",
+          isVectorCode: true,
+          rawCode: rawMermaid,
+        },
+      });
+    }
+  }
+
+  return candidates;
+}
 
 export function extractDiagrams(
-    markdown: string,
-    repository: RepositoryContext
+  markdown: string,
+  repoContext: RepositoryContext
 ): string[] {
-    const diagrams = new Set<string>();
-
-    extractImages(markdown, repository)
-        .filter(isDiagramAsset)
-        .forEach((url) => diagrams.add(url));
-
-    extractMermaidDiagrams(markdown)
-        .forEach((url) => diagrams.add(url));
-
-    return [...diagrams];
+  return extractDiagramsWithContext(markdown, repoContext).map((c) => c.url);
 }
 
-function isDiagramAsset(url: string): boolean {
-    return (
-        containsDiagramKeyword(url) ||
-        isDiagramFolder(url)
-    );
-}
+function isDiagramAsset(url: string, context: DiagramContext): boolean {
+  const textToScan = [
+    url,
+    context.altText ?? "",
+    context.sectionHeading ?? "",
+  ].join(" ").toLowerCase();
 
-function containsDiagramKeyword(url: string): boolean {
-    return containsKeyword(url, DIAGRAM_KEYWORDS);
+  return (
+    DIAGRAM_KEYWORDS.some((kw) => textToScan.includes(kw)) ||
+    isDiagramFolder(url)
+  );
 }
 
 function isDiagramFolder(url: string): boolean {
-    try {
-        const parsedUrl = new URL(url);
-        const pathSegments = parsedUrl.pathname
-            .toLowerCase()
-            .split("/")
-            .filter(Boolean);
+  try {
+    const parsedUrl = new URL(url);
+    const pathSegments = parsedUrl.pathname
+      .toLowerCase()
+      .split("/")
+      .filter(Boolean);
 
-        return pathSegments.some((segment) => (
-            DIAGRAM_FOLDERS.includes(segment)
-        ));
-    } catch {
-        return false;
-    }
+    return pathSegments.some((segment) => DIAGRAM_FOLDERS.includes(segment));
+  } catch {
+    return false;
+  }
 }
 
-function containsKeyword(
-    url: string,
-    keywords: string[]
-): boolean {
-    const searchableUrl = safelyDecodeUrl(url.toLowerCase())
-        .replace(/[^a-z0-9]+/g, " ");
-    const terms = searchableUrl.split(" ");
-
-    return keywords.some((keyword) => (
-        terms.includes(keyword)
-    ));
-}
-
-function safelyDecodeUrl(url: string): string {
-    try {
-        return decodeURIComponent(url);
-    } catch {
-        return url;
-    }
-}
-
-function extractMermaidDiagrams(markdown: string): string[] {
-    const diagrams: string[] = [];
-
-    let match: RegExpExecArray | null;
-
-    while ((match = MERMAID_REGEX.exec(markdown)) !== null) {
-        const diagram = match[1].trim();
-
-        if (diagram) {
-            diagrams.push(buildMermaidImageUrl(diagram));
-        }
-    }
-
-    return diagrams;
-}
-
-function buildMermaidImageUrl(diagram: string): string {
-    const encodedDiagram = Buffer
-        .from(diagram, "utf8")
-        .toString("base64url");
-
-    return `https://mermaid.ink/img/${encodedDiagram}?type=png&bgColor=!white`;
+function findPrecedingHeading(
+  markdown: string,
+  charIndex: number
+): string | null {
+  const textBefore = markdown.substring(0, charIndex);
+  const headings = textBefore.match(/^#{1,3}\s+(.+)$/gm);
+  if (!headings || headings.length === 0) return null;
+  return headings[headings.length - 1].replace(/^#{1,3}\s+/, "").trim();
 }

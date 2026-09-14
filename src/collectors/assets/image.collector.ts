@@ -1,4 +1,4 @@
-import type { Repository } from "../../models/repository.model";
+import type { Repository } from "../../models/repository.models";
 
 import { AssetService } from "../../services/assets";
 import { collectionStatistics } from "../../statistics/collection.statistics";
@@ -54,6 +54,7 @@ export async function collectRepositoryImages(
                 repositoryName: repository.name,
                 url,
                 type: "image",
+                sourceTier: repository.sourceTier,
             });
 
             repository.images.push(asset);

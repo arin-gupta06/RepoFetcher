@@ -1,4 +1,4 @@
-import type { Repository } from "../models/repository.model";
+import type { Repository } from "../models/repository.models";
 import type { Dataset } from "../models/datasets.models";
 
 export function previewRepositories(repositories: Repository[]): void {
