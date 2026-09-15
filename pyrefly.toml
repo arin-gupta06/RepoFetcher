@@ -1,0 +1,10 @@
+# Pyrefly configuration for RepoFetcher
+# Points to the Conda base environment so third-party packages are resolved.
+
+python-path = "D:/Conda/python.exe"
+
+# Exclude Jupyter notebooks from strict type checking.
+# Data-science code (pandas, numpy, sklearn, matplotlib, torch) uses dynamic
+# patterns that Pyrefly's static analysis cannot resolve, producing many
+# false-positive errors.
+project-excludes = ["notebooks/"]

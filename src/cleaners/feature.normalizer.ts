@@ -88,9 +88,66 @@ export class FeatureNormalizer {
       return curated.architecturePattern;
     }
 
+    const topics = (repo.topics ?? []).map((t) => t.toLowerCase().replace(/^topic:/, ""));
+
+    // 2. High-Confidence Architectural Topic Mapping
+    if (
+      topics.includes("clean-architecture") ||
+      topics.includes("hexagonal-architecture") ||
+      topics.includes("onion-architecture")
+    ) {
+      return "Clean Architecture / Hexagonal";
+    }
+
+    if (
+      topics.includes("microservices") ||
+      topics.includes("microservice") ||
+      topics.includes("dapr")
+    ) {
+      return "Microservices Architecture";
+    }
+
+    if (
+      topics.includes("event-driven") ||
+      topics.includes("kafka") ||
+      topics.includes("rabbitmq")
+    ) {
+      return "Event-Driven Architecture";
+    }
+
+    if (
+      topics.includes("domain-driven-design") ||
+      topics.includes("ddd") ||
+      topics.includes("cqrs") ||
+      topics.includes("event-sourcing")
+    ) {
+      return "Domain-Driven Design / CQRS";
+    }
+
+    if (
+      topics.includes("serverless") ||
+      topics.includes("lambda")
+    ) {
+      return "Serverless Architecture";
+    }
+
+    if (
+      topics.includes("modular-monolith")
+    ) {
+      return "Modular Monolith Architecture";
+    }
+
+    if (
+      topics.includes("mvc") ||
+      topics.includes("layered-architecture") ||
+      topics.includes("repository-pattern")
+    ) {
+      return "Layered Backend Architecture";
+    }
+
     const layerNames = layers.map((l) => l.layerName);
 
-    // 2. Pattern Heuristics
+    // 3. Pattern Heuristics
     const hasControllers = layerNames.includes("controllers") || layerNames.includes("routes");
     const hasServices = layerNames.includes("services");
     const hasRepos = layerNames.includes("repositories") || layerNames.includes("models");

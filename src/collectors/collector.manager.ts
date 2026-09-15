@@ -16,9 +16,11 @@ import { collectRepositoryImages } from "./assets/image.collector";
 import {
   collectGitHubRepositoriesPaged,
   collectGitHubRepositoriesByTopic,
+  collectGitHubRepositoriesByTopicAndLanguage,
   collectGitHubRepositories,
   fetchSingleRepository,
 } from "./github/github.collector";
+import { collectRepositoriesViaAuthenticatedWebSearch } from "./web/web-search.collector";
 import { collectKaggleDatasets } from "./kaggle/kaggle.collector";
 import { CheckpointStore } from "../storage/checkpoint.store";
 import { appendJsonl } from "../storage/json.exporter";
@@ -42,12 +44,12 @@ export async function runHarvestingPipeline(): Promise<void> {
   }
 
   // -------------------------------------------------------------
-  // Step 2: Ingest Scaled GitHub Sliced Repositories (Tier 4)
+  // Step 2: Ingest Architecture Topic Repositories (Tier 3 - High Priority for Diversity)
   // -------------------------------------------------------------
-  console.log("\n🌐 Ingesting Sliced GitHub Candidate Pool by Language...");
-  for (const lang of languages) {
-    console.log(`\n🔍 Searching language: ${lang}`);
-    const repos = await collectGitHubRepositoriesPaged(lang, 5);
+  console.log("\n🏗 Ingesting Architecture Topic Repositories (Targeted Architectural Classes)...");
+  for (const topic of ARCHITECTURE_TOPICS) {
+    console.log(`\n🔎 Searching topic: ${topic}`);
+    const repos = await collectGitHubRepositoriesByTopic(topic, 3);
 
     for (const repo of repos) {
       if (checkpoint.has(repo.id)) continue;
@@ -56,13 +58,48 @@ export async function runHarvestingPipeline(): Promise<void> {
     }
   }
 
+  // Cross-sample key architectural topics across varied programming languages
+  const keyTopics = [
+    "topic:clean-architecture",
+    "topic:hexagonal-architecture",
+    "topic:microservices",
+    "topic:domain-driven-design",
+    "topic:event-driven",
+    "topic:cqrs",
+  ];
+  const targetLanguages = ["Python", "Go", "Java", "C#", "Rust", "Typescript"];
+
+  console.log("\n🌐 Cross-Sampling Architecture Topics across Diverse Languages...");
+  for (const topic of keyTopics) {
+    for (const lang of targetLanguages) {
+      console.log(`   🔎 Querying ${topic} in ${lang}...`);
+      const repos = await collectGitHubRepositoriesByTopicAndLanguage(topic, lang, 2);
+      for (const repo of repos) {
+        if (checkpoint.has(repo.id)) continue;
+        await processAndStreamRepository(repo);
+        await checkpoint.markProcessed(repo.id);
+      }
+    }
+  }
+
   // -------------------------------------------------------------
-  // Step 3: Ingest Architecture Topic Repositories (Tier 3)
+  // Step 3: Ingest Authenticated Web Search Repositories (Tier 3)
   // -------------------------------------------------------------
-  console.log("\n🏗 Ingesting Architecture Topic Repositories...");
-  for (const topic of ARCHITECTURE_TOPICS) {
-    console.log(`\n🔎 Searching topic: ${topic}`);
-    const repos = await collectGitHubRepositoriesByTopic(topic);
+  console.log("\n🌐 Ingesting Discovered Repositories via Authenticated Web Search...");
+  const webRepos = await collectRepositoriesViaAuthenticatedWebSearch();
+  for (const repo of webRepos) {
+    if (checkpoint.has(repo.id)) continue;
+    await processAndStreamRepository(repo);
+    await checkpoint.markProcessed(repo.id);
+  }
+
+  // -------------------------------------------------------------
+  // Step 4: Ingest Scaled GitHub Sliced Repositories (Tier 4 - Balanced 1 Page per Bracket)
+  // -------------------------------------------------------------
+  console.log("\n🌐 Ingesting Sliced GitHub Candidate Pool by Language (Balanced Sample)...");
+  for (const lang of languages) {
+    console.log(`\n🔍 Searching language: ${lang}`);
+    const repos = await collectGitHubRepositoriesPaged(lang, 1);
 
     for (const repo of repos) {
       if (checkpoint.has(repo.id)) continue;

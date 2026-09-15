@@ -21,7 +21,7 @@ export interface Repository {
         profileUrl: string;
     };
 
-    source: "github" | "kaggle" | "curated";
+    source: "github" | "kaggle" | "curated" | "web";
     sourceTier: SourceTier;
 
     topics: string[];

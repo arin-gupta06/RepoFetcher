@@ -104,10 +104,64 @@ export async function collectGitHubRepositoriesByTopic(
       const items = response.data.items ?? [];
       if (items.length === 0) break;
 
+        const cleanTopic = topic.replace(/^topic:/, "").toLowerCase();
+        for (const item of items) {
+          if (!seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            const mappedRepo = mapGitHubRepository(item, "tier_3_verified_oss");
+            if (!mappedRepo.topics) mappedRepo.topics = [];
+            if (!mappedRepo.topics.includes(cleanTopic)) {
+              mappedRepo.topics.push(cleanTopic);
+            }
+            allRepos.push(mappedRepo);
+          }
+        }
+
+      collectionStatistics.incrementRepositories(items.length);
+      await delay(2000);
+    } catch (error: any) {
+      if (error.status === 403) {
+        console.warn("[GitHub Collector] Rate limit reached on topic search. Sleeping for 30s...");
+        await delay(30000);
+        break;
+      }
+      break;
+    }
+  }
+
+  return allRepos;
+}
+
+export async function collectGitHubRepositoriesByTopicAndLanguage(
+  topic: string,
+  language: string,
+  maxPages = 2
+): Promise<Repository[]> {
+  const allRepos: Repository[] = [];
+  const seenIds = new Set<number>();
+  const topicQuery = `${topic} language:${language} stars:>100`;
+
+  for (let page = 1; page <= maxPages; page++) {
+    try {
+      const response = await octokit.search.repos({
+        q: topicQuery,
+        page,
+        ...githubSearchOptions,
+      });
+
+      const items = response.data.items ?? [];
+      if (items.length === 0) break;
+
+      const cleanTopic = topic.replace(/^topic:/, "").toLowerCase();
       for (const item of items) {
         if (!seenIds.has(item.id)) {
           seenIds.add(item.id);
-          allRepos.push(mapGitHubRepository(item, "tier_3_verified_oss"));
+          const mappedRepo = mapGitHubRepository(item, "tier_3_verified_oss");
+          if (!mappedRepo.topics) mappedRepo.topics = [];
+          if (!mappedRepo.topics.includes(cleanTopic)) {
+            mappedRepo.topics.push(cleanTopic);
+          }
+          allRepos.push(mappedRepo);
         }
       }
 
@@ -115,7 +169,7 @@ export async function collectGitHubRepositoriesByTopic(
       await delay(2000);
     } catch (error: any) {
       if (error.status === 403) {
-        console.warn("[GitHub Collector] Rate limit reached on topic search. Sleeping for 30s...");
+        console.warn(`[GitHub Collector] Rate limit on ${topic} (${language}). Sleeping 30s...`);
         await delay(30000);
         break;
       }
