@@ -2,6 +2,7 @@ import { languages } from "../constants/languages.constants";
 import {
   CURATED_REFERENCE_REPOSITORIES,
 } from "../constants/curated-sources.constants";
+import { ARCHITECTURE_TOPICS } from "./github/github.query";
 import type { Repository } from "../models/repository.models";
 import type { CollectionResult } from "../models/collection-result.models";
 
@@ -14,6 +15,7 @@ import { collectRepositoryImages } from "./assets/image.collector";
 
 import {
   collectGitHubRepositoriesPaged,
+  collectGitHubRepositoriesByTopic,
   collectGitHubRepositories,
   fetchSingleRepository,
 } from "./github/github.collector";
@@ -42,10 +44,25 @@ export async function runHarvestingPipeline(): Promise<void> {
   // -------------------------------------------------------------
   // Step 2: Ingest Scaled GitHub Sliced Repositories (Tier 4)
   // -------------------------------------------------------------
-  console.log("\n🌐 Ingesting Sliced GitHub Candidate Pool...");
+  console.log("\n🌐 Ingesting Sliced GitHub Candidate Pool by Language...");
   for (const lang of languages) {
     console.log(`\n🔍 Searching language: ${lang}`);
-    const repos = await collectGitHubRepositoriesPaged(lang, 2);
+    const repos = await collectGitHubRepositoriesPaged(lang, 5);
+
+    for (const repo of repos) {
+      if (checkpoint.has(repo.id)) continue;
+      await processAndStreamRepository(repo);
+      await checkpoint.markProcessed(repo.id);
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Step 3: Ingest Architecture Topic Repositories (Tier 3)
+  // -------------------------------------------------------------
+  console.log("\n🏗 Ingesting Architecture Topic Repositories...");
+  for (const topic of ARCHITECTURE_TOPICS) {
+    console.log(`\n🔎 Searching topic: ${topic}`);
+    const repos = await collectGitHubRepositoriesByTopic(topic);
 
     for (const repo of repos) {
       if (checkpoint.has(repo.id)) continue;

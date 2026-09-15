@@ -83,6 +83,49 @@ export async function fetchSingleRepository(
   }
 }
 
+export async function collectGitHubRepositoriesByTopic(
+  topic: string,
+  maxPages = 3
+): Promise<Repository[]> {
+  const allRepos: Repository[] = [];
+  const seenIds = new Set<number>();
+
+  // Strip "topic:" prefix for the search query
+  const topicQuery = `${topic} stars:>200`;
+
+  for (let page = 1; page <= maxPages; page++) {
+    try {
+      const response = await octokit.search.repos({
+        q: topicQuery,
+        page,
+        ...githubSearchOptions,
+      });
+
+      const items = response.data.items ?? [];
+      if (items.length === 0) break;
+
+      for (const item of items) {
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          allRepos.push(mapGitHubRepository(item, "tier_3_verified_oss"));
+        }
+      }
+
+      collectionStatistics.incrementRepositories(items.length);
+      await delay(2000);
+    } catch (error: any) {
+      if (error.status === 403) {
+        console.warn("[GitHub Collector] Rate limit reached on topic search. Sleeping for 30s...");
+        await delay(30000);
+        break;
+      }
+      break;
+    }
+  }
+
+  return allRepos;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

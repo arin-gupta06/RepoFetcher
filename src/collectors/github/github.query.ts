@@ -14,6 +14,20 @@ export const ARCHITECTURE_TOPICS = [
   "topic:domain-driven-design",
   "topic:mvc",
   "topic:starter-kit",
+  "topic:ddd",
+  "topic:cqrs",
+  "topic:event-driven",
+  "topic:rest-api",
+  "topic:graphql",
+  "topic:serverless",
+  "topic:api-gateway",
+  "topic:repository-pattern",
+  "topic:design-patterns",
+  "topic:boilerplate",
+  "topic:template",
+  "topic:nestjs",
+  "topic:fastapi",
+  "topic:spring-boot",
 ];
 
 export function buildRepositorySearchQuery(language: string): string {
