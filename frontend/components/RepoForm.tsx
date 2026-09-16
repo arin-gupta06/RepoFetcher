@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import TagInput from "./TagInput";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const LANGUAGES = ["TypeScript", "JavaScript", "Python", "Go", "Java", "C#", "Rust", "PHP", "Dart"];
 const FRAMEWORKS = ["Express", "NestJS", "FastAPI", "Django", "Spring Boot", "Gin", "Axum", "Apollo Server", "GraphQL", "Next.js", "React", "Flutter", "Dapr", "TypeORM", "Fastify", "Koa"];
@@ -77,11 +79,88 @@ export default function RepoForm({ onSubmit, isLoading }: RepoFormProps) {
     readmeSnippet: "",
   });
 
+  const [languages, setLanguages] = useState<string[]>(LANGUAGES);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [detectStatus, setDetectStatus] = useState<string | null>(null);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const lastDetectedRef = useRef<string>("");
+
   const set = <K extends keyof FormValues>(key: K, val: FormValues[K]) =>
     setValues((prev) => ({ ...prev, [key]: val }));
 
   const loadExample = (example: Partial<FormValues>) =>
     setValues((prev) => ({ ...prev, ...example }));
+
+  // Debounced auto-detection when user enters / pastes a GitHub URL or repo slug
+  useEffect(() => {
+    const rawInput = values.repoName.trim();
+    if (!rawInput) {
+      setDetectStatus(null);
+      setDetectError(null);
+      return;
+    }
+
+    // Match GitHub URL (https://github.com/owner/repo), git@, or owner/repo format
+    const isPotentialRepo = (rawInput.includes("/") || rawInput.includes("github.com")) && 
+                            !rawInput.endsWith("/") && 
+                            rawInput.length >= 3;
+
+    if (!isPotentialRepo) return;
+    if (rawInput === lastDetectedRef.current) return;
+
+    const timeoutId = setTimeout(async () => {
+      setIsDetecting(true);
+      setDetectStatus("Inspecting GitHub repository & detecting signals...");
+      setDetectError(null);
+
+      try {
+        const res = await fetch(`${API_BASE}/detect-repo`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: rawInput }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({ detail: "Repository inspection failed" }));
+          throw new Error(errData.detail || "Could not inspect repository");
+        }
+
+        const data = await res.json();
+        lastDetectedRef.current = rawInput;
+
+        // Ensure language is in the dropdown list
+        if (data.language) {
+          setLanguages((prev) => (prev.includes(data.language) ? prev : [...prev, data.language]));
+        }
+
+        // Seamlessly auto-populate all placeholders/inputs in the form
+        setValues((prev) => ({
+          ...prev,
+          repoName: data.repo_name || prev.repoName,
+          language: data.language || prev.language,
+          stars: typeof data.stars === "number" ? data.stars : prev.stars,
+          totalFiles: typeof data.total_files === "number" ? data.total_files : prev.totalFiles,
+          frameworks: Array.isArray(data.frameworks) && data.frameworks.length > 0 ? data.frameworks : prev.frameworks,
+          layers: Array.isArray(data.layers) && data.layers.length > 0 ? data.layers : prev.layers,
+          hasArchDocs: typeof data.has_arch_docs === "boolean" ? data.has_arch_docs : prev.hasArchDocs,
+          readmeSnippet: data.readme_snippet || prev.readmeSnippet,
+        }));
+
+        setDetectStatus("✓ Auto-populated all fields from GitHub repository signals!");
+        setTimeout(() => {
+          setDetectStatus((curr) => (curr?.startsWith("✓") ? null : curr));
+        }, 4500);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Could not auto-detect repository";
+        setDetectError(`Notice: ${msg}. You can still fill fields manually.`);
+        setTimeout(() => setDetectError(null), 5000);
+      } finally {
+        setIsDetecting(false);
+      }
+    }, 600);
+
+    return () => clearTimeout(timeoutId);
+  }, [values.repoName]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,25 +202,62 @@ export default function RepoForm({ onSubmit, isLoading }: RepoFormProps) {
 
       <div className="divider" style={{ margin: "0" }} />
 
-      {/* Repository name */}
+      {/* Repository name or GitHub URL */}
       <div>
-        <label className="section-label" style={{ display: "block", marginBottom: 6 }}>
-          Repository Name
-        </label>
-        <input
-          style={inputStyle}
-          placeholder="e.g. expressjs/express"
-          value={values.repoName}
-          onChange={(e) => set("repoName", e.target.value)}
-          onFocus={(e) => {
-            e.currentTarget.style.borderColor = "rgba(124,58,237,0.6)";
-            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.15)";
-          }}
-          onBlur={(e) => {
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
-            e.currentTarget.style.boxShadow = "none";
-          }}
-        />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <label className="section-label" style={{ margin: 0 }}>
+            Repository Name or GitHub URL
+          </label>
+          {isDetecting && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "0.75rem", color: "#a78bfa" }}>
+              <span className="spinner" style={{ width: 12, height: 12, borderWidth: 1.5 }} />
+              Auto-detecting...
+            </span>
+          )}
+        </div>
+        <div style={{ position: "relative" }}>
+          <input
+            style={{
+              ...inputStyle,
+              paddingRight: isDetecting ? "2.5rem" : "0.9rem",
+            }}
+            placeholder="e.g. expressjs/express or https://github.com/expressjs/express"
+            value={values.repoName}
+            onChange={(e) => set("repoName", e.target.value)}
+            onFocus={(e) => {
+              e.currentTarget.style.borderColor = "rgba(124,58,237,0.6)";
+              e.currentTarget.style.boxShadow = "0 0 0 3px rgba(124,58,237,0.15)";
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)";
+              e.currentTarget.style.boxShadow = "none";
+            }}
+          />
+        </div>
+        {detectStatus && (
+          <div style={{
+            marginTop: 6,
+            fontSize: "0.75rem",
+            color: detectStatus.startsWith("✓") ? "#34d399" : "#a78bfa",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}>
+            <span>{detectStatus}</span>
+          </div>
+        )}
+        {detectError && (
+          <div style={{
+            marginTop: 6,
+            fontSize: "0.75rem",
+            color: "#f59e0b",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}>
+            <span>{detectError}</span>
+          </div>
+        )}
       </div>
 
       {/* Language + Stars row */}
@@ -163,7 +279,7 @@ export default function RepoForm({ onSubmit, isLoading }: RepoFormProps) {
               e.currentTarget.style.boxShadow = "none";
             }}
           >
-            {LANGUAGES.map((l) => (
+            {languages.map((l) => (
               <option key={l} value={l} style={{ background: "#0f0f23" }}>
                 {l}
               </option>

@@ -7,14 +7,7 @@ import ResultCard from "@/components/ResultCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-interface PredictResult {
-  top_pattern: string;
-  confidence: number;
-  top_candidates: Array<{ pattern: string; confidence: number; evidence: string[] }>;
-  rationale: string;
-  source_tier_hint: string;
-  model_info: string;
-}
+import type { PredictResult } from "@/types/predict";
 
 const STATS = [
   { label: "Repositories", value: "66" },

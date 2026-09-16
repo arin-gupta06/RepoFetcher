@@ -3,8 +3,9 @@
 
 python-path = "D:/Conda/python.exe"
 
+# Disable automatic heuristics that wrongly inferred 'src' (TypeScript root) as Python import root
+disable-search-path-heuristics = true
+search-path = ["api", "."]
+
 # Exclude Jupyter notebooks from strict type checking.
-# Data-science code (pandas, numpy, sklearn, matplotlib, torch) uses dynamic
-# patterns that Pyrefly's static analysis cannot resolve, producing many
-# false-positive errors.
 project-excludes = ["notebooks/"]
