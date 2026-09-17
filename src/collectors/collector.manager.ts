@@ -17,6 +17,7 @@ import {
   collectGitHubRepositoriesPaged,
   collectGitHubRepositoriesByTopic,
   collectGitHubRepositoriesByTopicAndLanguage,
+  collectGitHubRepositoriesByCustomQuery,
   collectGitHubRepositories,
   fetchSingleRepository,
 } from "./github/github.collector";
@@ -24,6 +25,9 @@ import { collectRepositoriesViaAuthenticatedWebSearch } from "./web/web-search.c
 import { collectKaggleDatasets } from "./kaggle/kaggle.collector";
 import { CheckpointStore } from "../storage/checkpoint.store";
 import { appendJsonl } from "../storage/json.exporter";
+import { SkewnessAnalyzer } from "./adaptive/skewness-analyzer";
+import { AdaptiveQueryGenerator } from "./adaptive/adaptive-query-generator";
+import { EvidenceValidator } from "./adaptive/evidence-validator";
 
 const checkpoint = new CheckpointStore();
 
@@ -109,22 +113,80 @@ export async function runHarvestingPipeline(): Promise<void> {
   }
 }
 
-export async function processAndStreamRepository(repository: Repository): Promise<void> {
+export async function runAdaptiveHarvestingPipeline(options?: {
+  maxQueries?: number;
+  maxReposPerBatch?: number;
+}): Promise<void> {
+  await checkpoint.load();
+  console.log(`\n🧠 [Adaptive Fetcher] Evaluating dataset skewness...`);
+
+  const report = await SkewnessAnalyzer.analyzeFromSummary();
+  console.log(`📊 Current Symmetry Score: ${report.symmetryScore}%`);
+  console.log(`   Language Entropy:     ${report.metrics.languageEntropy} (Gini-Simpson: ${report.metrics.languageGiniSimpson})`);
+  console.log(`   Architecture Entropy: ${report.metrics.architectureEntropy} (Gini-Simpson: ${report.metrics.architectureGiniSimpson})`);
+  console.log(`   Starved Languages:    ${report.starvedCategories.languages.length}`);
+  console.log(`   Starved Architectures: ${report.starvedCategories.architectures.length}`);
+
+  const maxRepos = options?.maxReposPerBatch ?? 50;
+  const harvestPlan = AdaptiveQueryGenerator.generateHarvestPlan(
+    report,
+    options?.maxQueries ?? 20,
+    maxRepos
+  );
+
+  console.log(`\n🎯 Generated ${harvestPlan.length} Tiered Water-Filling harvest queries.`);
+
+  let newlyIngested = 0;
+
+  for (const item of harvestPlan) {
+    if (newlyIngested >= maxRepos) {
+      console.log(`\n⏹ Batch limit of ${maxRepos} repos reached for this cycle.`);
+      break;
+    }
+
+    console.log(`\n🔍 [${item.tierName}] Quota: ${item.targetQuota} repos (Priority: ${item.priorityScore})`);
+    console.log(`   Query: "${item.query}" (maxPages: ${item.maxPages})`);
+    console.log(`   Rationale: ${item.rationale}`);
+
+    const repos = await collectGitHubRepositoriesByCustomQuery(item.query, item.maxPages);
+    console.log(`   -> Discovered ${repos.length} candidates.`);
+
+    let queryIngested = 0;
+
+    for (const repo of repos) {
+      if (checkpoint.has(repo.id)) continue;
+      if (queryIngested >= item.targetQuota) {
+        console.log(`   -> Target Water-Filling quota (${item.targetQuota}) reached for this query.`);
+        break;
+      }
+
+      const accepted = await processAndStreamRepository(repo);
+      await checkpoint.markProcessed(repo.id);
+
+      if (accepted) {
+        newlyIngested++;
+        queryIngested++;
+      }
+
+      if (newlyIngested >= maxRepos) break;
+    }
+  }
+
+  console.log(`\n✅ Adaptive harvest cycle completed: ${newlyIngested} verified repositories ingested.`);
+}
+
+export async function processAndStreamRepository(repository: Repository): Promise<boolean> {
   console.log(`📦 Processing ${repository.fullName} (${repository.sourceTier})...`);
 
   // 1. Readme
   const readme = await collectRepositoryReadme(repository);
   if (readme) {
     repository.readme = readme;
-    await appendJsonl(readme, "data/readmes.jsonl");
   }
 
   // 2. Architecture Docs
   const archDocs = await collectRepositoryArchitectureDocs(repository);
   repository.architectureDocs = archDocs;
-  for (const doc of archDocs) {
-    await appendJsonl(doc, "data/architecture-docs.jsonl");
-  }
 
   // 3. Manifests & Frameworks
   const manifests = await collectRepositoryManifests(
@@ -138,10 +200,33 @@ export async function processAndStreamRepository(repository: Repository): Promis
   if (fingerprint) {
     fingerprint.manifests = manifests;
     repository.fingerprint = fingerprint;
+  }
+
+  // 5. Architecture Evidence Safety Gate Validation
+  const validation = EvidenceValidator.validateRepository(repository);
+  if (!validation.isValid) {
+    console.log(`   ⚠️ [Evidence Gate REJECTED] ${repository.fullName} (Score: ${validation.evidenceScore}): ${validation.rejectionReason}`);
+    return false;
+  }
+
+  console.log(`   ✅ [Evidence Gate PASSED] Score: ${validation.evidenceScore} | ${validation.signals.join(" • ")}`);
+
+  // 6. Persist Verified Assets
+  if (readme) {
+    await appendJsonl(readme, "data/readmes.jsonl");
+  }
+
+  if (archDocs && archDocs.length > 0) {
+    for (const doc of archDocs) {
+      await appendJsonl(doc, "data/architecture-docs.jsonl");
+    }
+  }
+
+  if (fingerprint) {
     await appendJsonl(fingerprint, "data/structural-fingerprints.jsonl");
   }
 
-  // 5. Diagrams with Context & pHash
+  // 7. Diagrams with Context & pHash
   await collectRepositoryDiagrams(repository);
   if (repository.diagrams && repository.diagrams.length > 0) {
     for (const diag of repository.diagrams) {
@@ -152,8 +237,9 @@ export async function processAndStreamRepository(repository: Repository): Promis
     }
   }
 
-  // 6. Master Repository Record
+  // 8. Master Repository Record
   await appendJsonl(repository, "data/repositories.jsonl");
+  return true;
 }
 
 export async function collectResources(): Promise<CollectionResult> {

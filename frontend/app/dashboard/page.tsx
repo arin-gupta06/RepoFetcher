@@ -56,6 +56,22 @@ const STATIC_STATS = {
   preparedAt: "2026-09-14T20:49:00.739Z",
 };
 
+interface SymmetryTelemetry {
+  symmetry_score: number;
+  language_entropy: number;
+  language_gini_simpson: number;
+  architecture_entropy: number;
+  architecture_gini_simpson: number;
+  starved_categories: {
+    languages: Array<{ name: string; count: number; percentage: number; deficit: number }>;
+    architectures: Array<{ name: string; count: number; percentage: number; deficit: number }>;
+  };
+  saturated_categories: {
+    languages: Array<{ name: string; count: number; percentage: number; deficit: number }>;
+    architectures: Array<{ name: string; count: number; percentage: number; deficit: number }>;
+  };
+}
+
 interface DatasetStats {
   totalHarvestedRepos: number;
   cleanedSamplesCount: number;
@@ -67,6 +83,7 @@ interface DatasetStats {
   frameworksDistribution: Record<string, number>;
   tierDistribution: Record<string, number>;
   preparedAt: string;
+  symmetry_telemetry?: SymmetryTelemetry;
 }
 
 const STAT_CARDS = (stats: DatasetStats) => [
@@ -185,6 +202,82 @@ export default function DashboardPage() {
                   <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 4 }}>{label}</div>
                 </div>
               ))}
+        </div>
+
+        {/* Dataset Symmetry & Adaptive Balancing Panel */}
+        <div className="glass-strong animate-fadeSlideUp" style={{ padding: "1.75rem", marginBottom: "2rem", border: "1px solid rgba(124, 58, 237, 0.3)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "1rem", marginBottom: "1.25rem" }}>
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
+                <span style={{ fontSize: "1.2rem" }}>⚖️</span>
+                <h2 style={{ fontSize: "1.2rem", fontWeight: 700, margin: 0 }}>Dataset Symmetry & Adaptive Balancing</h2>
+                <span style={{ fontSize: "0.75rem", background: "rgba(124, 58, 237, 0.2)", color: "#a78bfa", padding: "2px 8px", borderRadius: 12, fontWeight: 600 }}>
+                  Closed-Loop Autonomous
+                </span>
+              </div>
+              <p style={{ fontSize: "0.85rem", color: "var(--muted)", margin: 0 }}>
+                Continuous distribution monitoring via Normalized Shannon Entropy & Gini-Simpson Index.
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: "0.75rem", color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Symmetry Index</div>
+                <div style={{ fontSize: "1.6rem", fontWeight: 800, color: (stats.symmetry_telemetry?.symmetry_score ?? 14.8) < 40 ? "#ef4444" : "#10b981" }}>
+                  {stats.symmetry_telemetry?.symmetry_score ?? 14.8}%
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "1.25rem" }}>
+            {/* Starved Categories */}
+            <div style={{ background: "rgba(239, 68, 68, 0.06)", border: "1px solid rgba(239, 68, 68, 0.2)", borderRadius: 12, padding: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#f87171" }}>🚨 Starved Domains (Prioritized Harvest)</span>
+                <span style={{ fontSize: "0.7rem", background: "rgba(239, 68, 68, 0.2)", color: "#fca5a5", padding: "2px 6px", borderRadius: 8 }}>4x Quota</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                {(stats.symmetry_telemetry?.starved_categories.languages ?? [
+                  { name: "Rust", count: 9 }, { name: "Python", count: 27 }, { name: "Kotlin", count: 74 }, { name: "Go", count: 113 }
+                ]).map((item: any) => (
+                  <span key={item.name} style={{ fontSize: "0.75rem", background: "rgba(239, 68, 68, 0.15)", color: "#fca5a5", padding: "3px 8px", borderRadius: 6, fontWeight: 500 }}>
+                    {item.name} ({item.count})
+                  </span>
+                ))}
+                {(stats.symmetry_telemetry?.starved_categories.architectures ?? [
+                  { name: "CQRS", count: 2 }, { name: "Event-Driven", count: 6 }, { name: "FastAPI Async", count: 10 }, { name: "Microservices & DDD", count: 1 }
+                ]).slice(0, 4).map((item: any) => (
+                  <span key={item.name} style={{ fontSize: "0.75rem", background: "rgba(245, 158, 11, 0.15)", color: "#fcd34d", padding: "3px 8px", borderRadius: 6, fontWeight: 500 }}>
+                    {item.name} ({item.count})
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Saturated Categories */}
+            <div style={{ background: "rgba(59, 130, 246, 0.06)", border: "1px solid rgba(59, 130, 246, 0.2)", borderRadius: 12, padding: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#60a5fa" }}>⏸️ Saturated Categories (Throttled)</span>
+                <span style={{ fontSize: "0.7rem", background: "rgba(59, 130, 246, 0.2)", color: "#93c5fd", padding: "2px 6px", borderRadius: 8 }}>Quota Paused</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                {(stats.symmetry_telemetry?.saturated_categories.languages ?? [
+                  { name: "JavaScript", percentage: 67.5 }, { name: "TypeScript", percentage: 16.7 }
+                ]).map((item: any) => (
+                  <span key={item.name} style={{ fontSize: "0.75rem", background: "rgba(59, 130, 246, 0.15)", color: "#bfdbfe", padding: "3px 8px", borderRadius: 6, fontWeight: 500 }}>
+                    {item.name} ({item.percentage ?? 67.5}%)
+                  </span>
+                ))}
+                {(stats.symmetry_telemetry?.saturated_categories.architectures ?? [
+                  { name: "General Modular Architecture", percentage: 76.5 }
+                ]).map((item: any) => (
+                  <span key={item.name} style={{ fontSize: "0.75rem", background: "rgba(139, 92, 246, 0.15)", color: "#ddd6fe", padding: "3px 8px", borderRadius: 6, fontWeight: 500 }}>
+                    {item.name} ({item.percentage ?? 76.5}%)
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Charts grid */}

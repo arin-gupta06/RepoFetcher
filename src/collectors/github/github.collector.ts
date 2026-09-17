@@ -180,6 +180,48 @@ export async function collectGitHubRepositoriesByTopicAndLanguage(
   return allRepos;
 }
 
+export async function collectGitHubRepositoriesByCustomQuery(
+  query: string,
+  maxPages = 3,
+  tier: SourceTier = "tier_3_verified_oss"
+): Promise<Repository[]> {
+  const allRepos: Repository[] = [];
+  const seenIds = new Set<number>();
+
+  for (let page = 1; page <= maxPages; page++) {
+    try {
+      const response = await octokit.search.repos({
+        q: query,
+        page,
+        ...githubSearchOptions,
+      });
+
+      const items = response.data.items ?? [];
+      if (items.length === 0) break;
+
+      for (const item of items) {
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          allRepos.push(mapGitHubRepository(item, tier));
+        }
+      }
+
+      collectionStatistics.incrementRepositories(items.length);
+      await delay(2000);
+    } catch (error: any) {
+      if (error.status === 403) {
+        console.warn(`[GitHub Collector] Rate limit reached on query: "${query}". Sleeping 30s...`);
+        await delay(30000);
+        break;
+      }
+      break;
+    }
+  }
+
+  return allRepos;
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+

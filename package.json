@@ -9,6 +9,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepare-dataset": "tsx src/pipelines/clean-dataset.ts",
+    "train": "python -m jupyter nbconvert --to notebook --execute --inplace notebooks/architecture_model.ipynb",
     "notebook": "python -m jupyterlab notebooks/architecture_model.ipynb",
     "test": "npm run typecheck"
   },

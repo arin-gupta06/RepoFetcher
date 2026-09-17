@@ -9,7 +9,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -162,16 +162,117 @@ def health() -> dict:
     return {"status": "ok", "service": "RepoLens AI API", "version": "2.0.0"}
 
 
+import math
+
+def compute_symmetry_telemetry() -> dict[str, Any]:
+    if not DATASET_SUMMARY_PATH.exists():
+        return {"symmetry_score": 14.8, "status": "no_summary"}
+    with open(DATASET_SUMMARY_PATH, encoding="utf-8") as f:
+        summary = json.load(f)
+
+    total = summary.get("cleanedSamplesCount") or summary.get("totalHarvestedRepos") or 3265
+    lang_counts = summary.get("languageDistribution", {})
+    arch_counts = summary.get("architecturePatternsDistribution", {})
+
+    def analyze(counts: dict[str, int]):
+        K = len(counts)
+        if K == 0 or total == 0:
+            return 0.0, 0.0, [], []
+        target = 1.0 / K
+        sum_p_log_p = 0.0
+        sum_p_sq = 0.0
+        starved, saturated = [], []
+        for name, cnt in counts.items():
+            p = cnt / total
+            if p > 0:
+                sum_p_log_p += p * math.log(p + 1e-9)
+                sum_p_sq += p * p
+            deficit = (target - p) / target
+            if cnt < 5:
+                tier_name = "Tier 1: Emergency"
+            elif cnt < 15:
+                tier_name = "Tier 2: Critical"
+            elif cnt < 30:
+                tier_name = "Tier 3: Developing"
+            elif cnt < 60:
+                tier_name = "Tier 4: Usable"
+            else:
+                tier_name = "Tier 5: Saturated"
+            metric = {
+                "name": name,
+                "count": cnt,
+                "percentage": round(p * 100, 2),
+                "deficit": round(deficit * 100, 1),
+                "tier": tier_name,
+            }
+            if cnt < 15 or p < 0.4 * target:
+                starved.append(metric)
+            elif cnt >= 60 or p > 1.5 * target:
+                saturated.append(metric)
+        h_norm = -sum_p_log_p / math.log(K) if K > 1 else 1.0
+        gs = 1.0 - sum_p_sq
+        return max(0.0, min(1.0, h_norm)), max(0.0, min(1.0, gs)), starved, saturated
+
+    lang_h, lang_gs, starved_langs, sat_langs = analyze(lang_counts)
+    arch_h, arch_gs, starved_archs, sat_archs = analyze(arch_counts)
+    avg_h = (lang_h + arch_h) / 2.0
+    avg_gs = (lang_gs + arch_gs) / 2.0
+    symmetry_score = round(avg_h * min(1.0, avg_gs * 1.05) * 100, 1)
+
+    return {
+        "symmetry_score": symmetry_score,
+        "language_entropy": round(lang_h, 4),
+        "language_gini_simpson": round(lang_gs, 4),
+        "architecture_entropy": round(arch_h, 4),
+        "architecture_gini_simpson": round(arch_gs, 4),
+        "starved_categories": {
+            "languages": starved_langs[:8],
+            "architectures": starved_archs[:8],
+        },
+        "saturated_categories": {
+            "languages": sat_langs[:5],
+            "architectures": sat_archs[:5],
+        },
+    }
+
+
+@app.get("/dataset/symmetry", tags=["Data"])
+def get_dataset_symmetry() -> dict:
+    """Return live dataset symmetry and skewness metrics."""
+    return compute_symmetry_telemetry()
+
+
+@app.post("/harvest/plan", tags=["Data"])
+def get_harvest_plan() -> dict:
+    """Return active dynamic harvest priorities to normalize skewness."""
+    telemetry = compute_symmetry_telemetry()
+    starved_langs = [l["name"] for l in telemetry.get("starved_categories", {}).get("languages", [])]
+    starved_archs = [a["name"] for a in telemetry.get("starved_categories", {}).get("architectures", [])]
+    return {
+        "symmetry_score": telemetry.get("symmetry_score", 14.8),
+        "harvest_mode": "adaptive",
+        "starved_languages": starved_langs,
+        "starved_architectures": starved_archs,
+        "recommended_page_allocation": {
+            "starved": 4,
+            "balanced": 2,
+            "saturated": 0,
+        },
+    }
+
+
 @app.get("/stats", tags=["Data"])
 def get_stats() -> dict:
-    """Return the dataset summary statistics."""
+    """Return the dataset summary statistics enriched with symmetry metrics."""
     if not DATASET_SUMMARY_PATH.exists():
         raise HTTPException(
             status_code=404,
             detail="Dataset summary not found. Run the data pipeline first.",
         )
     with open(DATASET_SUMMARY_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        data = json.load(f)
+    data["symmetry_telemetry"] = compute_symmetry_telemetry()
+    return data
 
 
 @app.post("/predict", response_model=PredictResponse, tags=["Inference"])

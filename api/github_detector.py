@@ -90,54 +90,58 @@ def get_headers() -> dict[str, str]:
     return headers
 
 
-def detect_repository_metadata(url_or_slug: str) -> dict[str, Any]:
-    """
-    Given a GitHub URL or owner/repo string, inspects the repository and returns:
-    repo_name, language, stars, total_files, frameworks, layers, has_arch_docs, readme_snippet.
-    """
-    slug_pair = parse_repo_slug(url_or_slug)
-    if not slug_pair:
-        raise ValueError(f"Could not parse a valid GitHub repository from: '{url_or_slug}'")
+def clean_readme_prose(text: str) -> str:
+    """Strips badges, shields, build images, and markdown link boilerplate."""
+    if not text:
+        return ""
+    text = re.sub(r"<img[^>]*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\[!\[.*?\]\(.*?\)\]\(.*?\)", " ", text)
+    text = re.sub(r"!\[.*?\]\(.*?\)", " ", text)
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"^\s*\[[^\]]+\]:\s*\S+", " ", text, flags=re.MULTILINE)
+    text = re.sub(r"(?i)#+\s*(license|badges?|build status|ci|codecov|backers?|sponsors?).*", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
-    owner, repo = slug_pair
-    headers = get_headers()
 
-    # 1. Fetch Repository Info
-    repo_resp = requests.get(f"{GITHUB_API_BASE}/repos/{owner}/{repo}", headers=headers, timeout=10)
-    if repo_resp.status_code == 404:
-        raise ValueError(f"GitHub repository '{owner}/{repo}' not found or is private.")
-    if repo_resp.status_code != 200:
-        raise ValueError(f"GitHub API returned HTTP {repo_resp.status_code} for '{owner}/{repo}'.")
+def detect_repository_metadata(repo_url_or_slug: str) -> dict[str, Any]:
+    parsed = parse_repo_slug(repo_url_or_slug)
+    if not parsed:
+        raise ValueError(
+            f"Invalid GitHub repository URL or slug: '{repo_url_or_slug}'. "
+            "Please provide a format like 'owner/repo' or 'https://github.com/owner/repo'."
+        )
 
-    repo_data = repo_resp.json()
-    full_name = repo_data.get("full_name") or f"{owner}/{repo}"
+    owner, repo = parsed
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+
+    # 1. Fetch Repository Metadata
+    repo_api_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}"
+    resp = requests.get(repo_api_url, headers=headers, timeout=10)
+    if resp.status_code == 404:
+        raise ValueError(f"Repository '{owner}/{repo}' not found on GitHub.")
+    if resp.status_code != 200:
+        raise ValueError(f"GitHub API error ({resp.status_code}): {resp.text}")
+
+    repo_data = resp.json()
+    full_name = repo_data.get("full_name", f"{owner}/{repo}")
+    stars = repo_data.get("stargazers_count", 0)
     language = repo_data.get("language") or "TypeScript"
-    stars = int(repo_data.get("stargazers_count", 0))
     default_branch = repo_data.get("default_branch", "main")
     description = repo_data.get("description") or ""
 
     # 2. Fetch README
-    readme_snippet = description
+    readme_snippet = clean_readme_prose(description)
     try:
         readme_resp = requests.get(f"{GITHUB_API_BASE}/repos/{owner}/{repo}/readme", headers=headers, timeout=8)
         if readme_resp.status_code == 200:
             content_b64 = readme_resp.json().get("content", "")
             raw_readme = base64.b64decode(content_b64).decode("utf-8", errors="ignore")
-            
-            # Clean badges, images, and take the first informative lines
-            lines = []
-            for line in raw_readme.splitlines():
-                line_str = line.strip()
-                if not line_str:
-                    continue
-                # Skip markdown image badges and links
-                if line_str.startswith("[![") or line_str.startswith("![") or "shields.io" in line_str:
-                    continue
-                lines.append(line_str)
-                if len("\n".join(lines)) > 1200:
-                    break
-            if lines:
-                readme_snippet = "\n".join(lines[:12])
+            cleaned_prose = clean_readme_prose(raw_readme)
+            if cleaned_prose:
+                readme_snippet = cleaned_prose[:1200]
     except Exception:
         pass
 

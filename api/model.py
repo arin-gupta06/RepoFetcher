@@ -19,12 +19,14 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # Path Configuration
 # ---------------------------------------------------------------------------
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
+MODELS_DIR = BASE_DIR / "models"
 SAMPLES_PATH = DATA_DIR / "model_ready" / "cleaned_repository_samples.jsonl"
 DIAGRAMS_PATH = DATA_DIR / "diagrams.jsonl"
 
@@ -174,6 +176,83 @@ def _init_datasets():
                 _DIAGRAMS_BY_REPO_ID.setdefault(repo_id, []).append(d)
 
     _IS_INITIALIZED = True
+
+
+# ---------------------------------------------------------------------------
+# Serialized Model Artifacts Cache
+# ---------------------------------------------------------------------------
+_VECTORIZER = None
+_CLASSIFIER = None
+_LABEL_ENCODER = None
+_REPO_EMBEDDINGS = None
+_REPO_METADATA: list[dict[str, Any]] = []
+_MODEL_METADATA: dict[str, Any] = {}
+_MODELS_LOADED = False
+
+
+def _init_models():
+    """Loads serialized semantic vectorizer, classifier, embeddings, and metadata once into memory."""
+    global _VECTORIZER, _CLASSIFIER, _LABEL_ENCODER, _REPO_EMBEDDINGS, _REPO_METADATA, _MODEL_METADATA, _MODELS_LOADED
+    if _MODELS_LOADED:
+        return
+
+    import joblib
+    from scipy import sparse  # type: ignore
+
+    try:
+        vec_path = MODELS_DIR / "tfidf_vectorizer.pkl"
+        clf_path = MODELS_DIR / "architecture_classifier.pkl"
+        le_path = MODELS_DIR / "label_encoder.pkl"
+        emb_path = MODELS_DIR / "repo_embeddings.npz"
+        meta_path = MODELS_DIR / "repo_metadata.json"
+        m_meta_path = MODELS_DIR / "model_metadata.json"
+
+        if vec_path.exists():
+            _VECTORIZER = joblib.load(vec_path)
+        if clf_path.exists():
+            _CLASSIFIER = joblib.load(clf_path)
+        if le_path.exists():
+            _LABEL_ENCODER = joblib.load(le_path)
+        if emb_path.exists():
+            _REPO_EMBEDDINGS = sparse.load_npz(emb_path)
+        if meta_path.exists():
+            with open(meta_path, encoding="utf-8") as f:
+                _REPO_METADATA = json.load(f)
+        if m_meta_path.exists():
+            with open(m_meta_path, encoding="utf-8") as f:
+                _MODEL_METADATA = json.load(f)
+
+        _MODELS_LOADED = True
+    except Exception as e:
+        print(f"[Warning] Failed to load semantic model artifacts: {e}")
+
+
+def build_rich_text(
+    language: str,
+    frameworks: list[str],
+    layers: list[str],
+    repo_name: str = "",
+    readme_snippet: str = "",
+    has_arch_docs: bool = False,
+    source_tier: str = "tier_3_verified_oss",
+) -> str:
+    """Canonical feature builder matching notebooks/train_and_serialize.py."""
+    tokens: list[str] = []
+    lang = language or "unknown"
+    tokens.append(f"language_{lang.lower().replace(' ', '_').replace('#', 'sharp')}")
+    tokens.append(f"sourcetier_{source_tier.lower()}")
+    for fw in frameworks:
+        tokens.append(f"framework_{fw.lower().replace(' ', '_').replace('.', '')}")
+    for l in layers:
+        tokens.append(f"layer_{l.lower().replace(' ', '_')}")
+    if repo_name:
+        slug_clean = re.sub(r"[/_-]", " ", repo_name.lower())
+        tokens.append(slug_clean)
+    if has_arch_docs:
+        tokens.append("architecture documentation adr design c4 specification")
+    if readme_snippet:
+        tokens.append(readme_snippet[:2500])
+    return " ".join(tokens)
 
 
 # ---------------------------------------------------------------------------
@@ -637,12 +716,17 @@ def find_closest_match_and_diagram(
     layers: list[str],
     top_pattern: str,
     subdomains: list[FunctionalSubdomain],
+    query_vector=None,
 ) -> tuple[ClosestBenchmarkMatch, Optional[RecommendedDiagram], AnalysisStatistics]:
     """
-    Searches the pruned repository dataset to identify the closest high-quality
-    benchmark repository, paired with verified architectural diagrams.
+    Two-Stage Context-Aware Benchmark & Diagram Retrieval:
+    1. Vector Cosine Similarity Search across 3,265 precomputed repo embeddings.
+    2. Architecture-Aware Reranking combining semantic similarity, pattern alignment,
+       framework compatibility, and language match.
+    3. Strict Diagram Verification: exact repo match -> exact pattern match -> None (Mermaid flow).
     """
     _init_datasets()
+    _init_models()
 
     input_lang = _normalize(language)
     input_fws = set(_normalize(f) for f in frameworks)
@@ -663,69 +747,45 @@ def find_closest_match_and_diagram(
         "architecturePattern": "Modular Monolith & DDD",
     }
 
-    repos_pool: list[dict[str, Any]] = _CACHED_REPOS if _CACHED_REPOS else [fallback_repo]
+    # Stage 1: Candidate Retrieval using Precomputed Embeddings
+    candidates_pool = []
+    if _REPO_EMBEDDINGS is not None and query_vector is not None and len(_REPO_METADATA) > 0:
+        from sklearn.preprocessing import normalize as sk_norm
+        q_norm = sk_norm(query_vector, norm="l2", copy=False)
+        sims = _REPO_EMBEDDINGS.dot(q_norm.T).toarray().ravel()
+        top_indices = np.argsort(sims)[::-1][:25]
+        for idx in top_indices:
+            if idx < len(_REPO_METADATA):
+                meta = dict(_REPO_METADATA[idx])
+                meta["_cosine_sim"] = float(sims[idx])
+                candidates_pool.append(meta)
 
-    for repo in repos_pool:
-        score = 0.0
+    if not candidates_pool:
+        candidates_pool = _REPO_METADATA if _REPO_METADATA else (_CACHED_REPOS if _CACHED_REPOS else [fallback_repo])
 
-        # 1. Pattern alignment (Weight: 35%)
-        repo_pattern: str = str(repo.get("architecturePattern") or "")
+    # Stage 2: Architecture-Aware Reranking
+    for repo in candidates_pool:
+        cos_sim = float(repo.get("_cosine_sim", 0.5))
+        repo_pattern = str(repo.get("architecture") or repo.get("architecturePattern") or "")
+
+        # 1. Pattern alignment (35%)
+        arch_align = 0.0
         if repo_pattern == top_pattern:
-            score += 0.35
+            arch_align = 1.0
         elif any(token in repo_pattern.lower() for token in top_pattern.lower().split() if len(token) > 3):
-            score += 0.20
+            arch_align = 0.6
 
-        # 2. Layer overlap (Weight: 25%)
-        detected_layers = set()
-        raw_layers = repo.get("detectedLayers")
-        if isinstance(raw_layers, list):
-            for layer_obj in raw_layers:
-                if isinstance(layer_obj, dict):
-                    detected_layers.add(_normalize(str(layer_obj.get("layerName") or "")))
-                elif isinstance(layer_obj, str):
-                    detected_layers.add(_normalize(layer_obj))
+        # 2. Framework overlap (15%)
+        raw_fws = repo.get("frameworks") or repo.get("detectedFrameworks") or []
+        repo_fws = set(_normalize(f) for f in raw_fws if isinstance(f, str))
+        fw_overlap = len(input_fws & repo_fws) / len(input_fws | repo_fws) if (input_fws and repo_fws) else 0.0
 
-        if input_layers and detected_layers:
-            jaccard = len(input_layers & detected_layers) / len(input_layers | detected_layers)
-            score += 0.25 * jaccard
-
-        # 3. Framework overlap (Weight: 15%)
-        raw_fws = repo.get("detectedFrameworks")
-        repo_fws = set()
-        if isinstance(raw_fws, list):
-            for f in raw_fws:
-                if isinstance(f, str):
-                    repo_fws.add(_normalize(f))
-
-        if input_fws and repo_fws:
-            fw_overlap = len(input_fws & repo_fws) / len(input_fws | repo_fws)
-            score += 0.15 * fw_overlap
-
-        # 4. Language match (Weight: 10%)
+        # 3. Language match (10%)
         repo_lang = str(repo.get("language") or "")
-        if _normalize(repo_lang) == input_lang:
-            score += 0.10
+        lang_match = 1.0 if _normalize(repo_lang) == input_lang else 0.0
 
-        # 5. Star quality / Tier boost (Weight: 15%)
-        stars_val = repo.get("stars", 0)
-        stars: int = int(stars_val) if isinstance(stars_val, (int, float)) else 0
-        tier = str(repo.get("sourceTier") or "")
-        if tier == "tier_1_template":
-            score += 0.15
-        elif tier == "tier_2_official":
-            score += 0.12
-        elif stars > 5000:
-            score += 0.10
-        elif stars > 1000:
-            score += 0.05
-
-        # 6. Bonus if this repo has pruned diagrams available
-        repo_id_val = repo.get("id")
-        repo_id_int: int | None = repo_id_val if isinstance(repo_id_val, int) else None
-        has_diagram = (repo_id_int is not None) and (repo_id_int in _DIAGRAMS_BY_REPO_ID)
-
-        if has_diagram:
-            score += 0.08
+        # 4. Final multi-factor score
+        score = 0.40 * cos_sim + 0.35 * arch_align + 0.15 * fw_overlap + 0.10 * lang_match
 
         if score > best_score:
             best_score = score
@@ -735,17 +795,22 @@ def find_closest_match_and_diagram(
         best_repo = fallback_repo
         best_score = 0.85
 
-    matched_repo_id_val = best_repo.get("id")
-    candidate_diagrams: list[dict[str, Any]] = []
-    if isinstance(matched_repo_id_val, int):
-        candidate_diagrams = _DIAGRAMS_BY_REPO_ID.get(matched_repo_id_val, [])
+    # Diagram Retrieval: Strict Hierarchy
+    # 1. Exact matched benchmark repository diagram
+    matched_repo_id = best_repo.get("repositoryId") or best_repo.get("id")
+    candidate_diagrams = []
+    if isinstance(matched_repo_id, int):
+        candidate_diagrams = _DIAGRAMS_BY_REPO_ID.get(matched_repo_id, [])
 
+    # 2. Verified diagram from a repo with the exact same architecture pattern
     if not candidate_diagrams and _CACHED_DIAGRAMS:
         candidate_diagrams = [
             d for d in _CACHED_DIAGRAMS
-            if str(d.get("diagramType") or "") in ("architecture_diagram", "flowchart", "sequence_diagram")
+            if isinstance(d.get("repositoryId"), int)
+            and _REPOS_BY_ID.get(d["repositoryId"], {}).get("architecturePattern") == top_pattern
         ]
 
+    # 3. Verified diagram or None (Never fall back to unrelated repos or badges!)
     if candidate_diagrams:
         candidate_diagrams.sort(key=lambda d: float(d.get("reliabilityScore", 0) or 0), reverse=True)
         chosen = candidate_diagrams[0]
@@ -755,7 +820,7 @@ def find_closest_match_and_diagram(
         storage_url = str(uploaded.get("storageUrl") or chosen.get("originalUrl") or "")
         orig_url = str(chosen.get("originalUrl") or storage_url)
         dtype = str(chosen.get("diagramType") or "architecture_diagram")
-        caption_str = str(context.get("sectionHeading") or "Architecture Overview Diagram")
+        caption_str = str(context.get("sectionHeading") or f"{top_pattern} Architecture Diagram")
         rel_score = float(chosen.get("reliabilityScore", 0.85) or 0.85)
 
         best_diagram = RecommendedDiagram(
@@ -904,94 +969,99 @@ def predict_architecture(
         repo_name=repo_name,
     )
 
-    # 3. Scoring Architecture Patterns
-    scores: dict[str, float] = {}
-    evidence_map: dict[str, list[str]] = {}
+    # 3. Universal Semantic ML Scoring Pipeline
+    _init_models()
+    rich_text = build_rich_text(
+        language=language,
+        frameworks=frameworks,
+        layers=cleaned_layers,
+        repo_name=repo_name,
+        readme_snippet=readme_snippet,
+        has_arch_docs=has_arch_docs,
+    )
 
-    lang_key = _normalize(language)
-    detected_layers = frozenset(_normalize(l) for l in cleaned_layers)
-    fw_keys = [_normalize(f) for f in frameworks]
+    query_vec = None
+    if _CLASSIFIER is not None and _VECTORIZER is not None and _LABEL_ENCODER is not None:
+        query_vec = _VECTORIZER.transform([rich_text])
+        probs = _CLASSIFIER.predict_proba(query_vec)[0]
+        top_k_indices = np.argsort(probs)[::-1]
 
-    # Framework signals
-    for fw in fw_keys:
-        for key, hints in FRAMEWORK_PATTERNS.items():
-            if key in fw or fw in key:
-                for pattern, weight in hints:
-                    scores[pattern] = scores.get(pattern, 0) + weight
-                    evidence_map.setdefault(pattern, []).append(f"Framework: {fw}")
+        candidates = []
+        for rank, idx in enumerate(top_k_indices[:4]):
+            pattern_name = _LABEL_ENCODER.classes_[idx]
+            conf = float(probs[idx])
+            evidence = []
+            if frameworks:
+                evidence.append(f"Framework alignment: {', '.join(frameworks[:3])}")
+            if cleaned_layers:
+                evidence.append(f"Structural layers: {', '.join(cleaned_layers[:4])}")
+            if has_arch_docs:
+                evidence.append("Verified architecture documentation detected")
+            if rank == 0 and not evidence:
+                evidence.append(f"Calibrated TF-IDF semantic pattern match ({conf * 100:.1f}% adherence)")
+            elif not evidence:
+                evidence.append("Multi-class candidate probability score")
 
-    # Layer structure signals
-    for target_layers, pattern, base_weight in LAYER_PATTERNS:
-        if not target_layers:
-            continue
-        intersection = len(detected_layers & target_layers)
-        union = len(detected_layers | target_layers)
-        overlap = intersection / union if union else 0.0
-        if overlap > 0.25:
-            bonus = base_weight * overlap
-            scores[pattern] = scores.get(pattern, 0) + bonus
-            matched = sorted(detected_layers & target_layers)
-            evidence_map.setdefault(pattern, []).append(
-                f"Layers matched: {', '.join(matched)} ({overlap:.0%} overlap)"
+            candidates.append(
+                PredictionCandidate(
+                    pattern=pattern_name,
+                    confidence=round(conf, 3),
+                    evidence=evidence,
+                )
             )
 
-    # README keyword signals
-    readme_lower = _normalize(readme_snippet)
-    readme_keywords: list[tuple[str, str, float]] = [
-        ("cqrs", "CQRS Pattern", 0.4),
-        ("event sourcing", "CQRS & Event Sourcing", 0.4),
-        ("event-driven", "Event-Driven Architecture", 0.3),
-        ("microservice", "Microservices Architecture", 0.35),
-        ("hexagonal", "Hexagonal Architecture", 0.45),
-        ("clean architecture", "Clean Architecture", 0.50),
-        ("domain-driven", "Domain-Driven Design", 0.40),
-        ("ddd", "Domain-Driven Design", 0.30),
-        ("serverless", "Serverless Architecture", 0.40),
-        ("graphql", "GraphQL Server Architecture", 0.35),
-        ("onion architecture", "Onion Architecture", 0.45),
-        ("layered", "Layered Backend Architecture", 0.25),
-        ("mvc", "Full-Stack MVC", 0.30),
-        ("modular monolith", "Modular Monolith & DDD", 0.45),
-    ]
-    for keyword, pattern, weight in readme_keywords:
-        if keyword in readme_lower:
-            scores[pattern] = scores.get(pattern, 0) + weight
-            evidence_map.setdefault(pattern, []).append(f"README mentions '{keyword}'")
-
-    # Language fallback
-    if lang_key in LANGUAGE_PATTERNS:
-        for pattern, weight in LANGUAGE_PATTERNS[lang_key]:
-            current = scores.get(pattern, 0)
-            scores[pattern] = current + weight * 0.4
-
-    # Size & Arch docs signal
-    if total_files > 150:
-        for p in ["Clean Architecture", "Microservices Architecture", "Domain-Driven Design"]:
-            scores[p] = scores.get(p, 0) + 0.10
-    if has_arch_docs:
-        for p in scores:
-            scores[p] *= 1.05
-
-    # Normalize & Rank
-    if not scores:
-        top_pattern = "Modular Layered Architecture"
-        top_conf = 0.50
-        ranked = [(top_pattern, top_conf)]
+        top_pattern = candidates[0].pattern
+        top_conf = candidates[0].confidence
     else:
-        total_score = sum(scores.values())
-        normalised = {p: v / total_score for p, v in scores.items()}
-        ranked = sorted(normalised.items(), key=lambda x: x[1], reverse=True)
-        top_pattern, top_conf = ranked[0]
+        scores: dict[str, float] = {}
+        evidence_map: dict[str, list[str]] = {}
 
-    # Build top candidates
-    candidates = [
-        PredictionCandidate(
-            pattern=p,
-            confidence=round(c, 3),
-            evidence=evidence_map.get(p, ["Standard ecosystem alignment"]),
-        )
-        for p, c in ranked[:3]
-    ]
+        lang_key = _normalize(language)
+        detected_layers = frozenset(_normalize(l) for l in cleaned_layers)
+        fw_keys = [_normalize(f) for f in frameworks]
+
+        # Framework signals
+        for fw in fw_keys:
+            for key, hints in FRAMEWORK_PATTERNS.items():
+                if key in fw or fw in key:
+                    for pattern, weight in hints:
+                        scores[pattern] = scores.get(pattern, 0) + weight
+                        evidence_map.setdefault(pattern, []).append(f"Framework: {fw}")
+
+        # Layer structure signals
+        for target_layers, pattern, base_weight in LAYER_PATTERNS:
+            if not target_layers:
+                continue
+            intersection = len(detected_layers & target_layers)
+            union = len(detected_layers | target_layers)
+            overlap = intersection / union if union else 0.0
+            if overlap > 0.25:
+                bonus = base_weight * overlap
+                scores[pattern] = scores.get(pattern, 0) + bonus
+                matched = sorted(detected_layers & target_layers)
+                evidence_map.setdefault(pattern, []).append(
+                    f"Layers matched: {', '.join(matched)} ({overlap:.0%} overlap)"
+                )
+
+        if not scores:
+            top_pattern = "Modular Layered Architecture"
+            top_conf = 0.50
+            ranked = [(top_pattern, top_conf)]
+        else:
+            total_score = sum(scores.values())
+            normalised = {p: v / total_score for p, v in scores.items()}
+            ranked = sorted(normalised.items(), key=lambda x: x[1], reverse=True)
+            top_pattern, top_conf = ranked[0]
+
+        candidates = [
+            PredictionCandidate(
+                pattern=p,
+                confidence=round(c, 3),
+                evidence=evidence_map.get(p, ["Standard ecosystem alignment"]),
+            )
+            for p, c in ranked[:3]
+        ]
+
 
     # Source tier heuristic
     tier = "tier_2_official" if stars > 10000 else "tier_3_verified_oss"
@@ -1030,6 +1100,7 @@ def predict_architecture(
         layers=cleaned_layers,
         top_pattern=top_pattern,
         subdomains=functional_subdomains,
+        query_vector=query_vec,
     )
 
     comparison = ComparisonStatistics(
