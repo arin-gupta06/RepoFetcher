@@ -1,67 +1,101 @@
 "use client";
 
-import { useState, KeyboardEvent } from "react";
+import { useState, KeyboardEvent, useId } from "react";
 
-interface TagInputProps {
-  label: string;
+export interface TagInputProps {
+  label?: string;
   placeholder: string;
-  values: string[];
+  values?: string[];
+  tags?: string[];
   onChange: (values: string[]) => void;
   suggestions?: string[];
 }
 
-export default function TagInput({ label, placeholder, values, onChange, suggestions = [] }: TagInputProps) {
+export default function TagInput({
+  label,
+  placeholder,
+  values,
+  tags,
+  onChange,
+  suggestions = [],
+}: TagInputProps) {
+  const currentValues = values ?? tags ?? [];
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const inputId = useId();
 
   const filtered = suggestions.filter(
-    (s) => s.toLowerCase().includes(input.toLowerCase()) && !values.includes(s)
+    (s) => s.toLowerCase().includes(input.toLowerCase()) && !currentValues.includes(s)
   );
 
   const add = (val: string) => {
     const trimmed = val.trim();
-    if (trimmed && !values.includes(trimmed)) {
-      onChange([...values, trimmed]);
+    if (trimmed && !currentValues.includes(trimmed)) {
+      onChange([...currentValues, trimmed]);
     }
     setInput("");
     setShowSuggestions(false);
   };
 
-  const remove = (val: string) => onChange(values.filter((v) => v !== val));
+  const remove = (val: string) => onChange(currentValues.filter((v) => v !== val));
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       add(input);
-    } else if (e.key === "Backspace" && !input && values.length) {
-      remove(values[values.length - 1]);
+    } else if (e.key === "Backspace" && !input && currentValues.length) {
+      remove(currentValues[currentValues.length - 1]);
     }
   };
 
   return (
     <div style={{ position: "relative" }}>
-      <label className="section-label" style={{ display: "block", marginBottom: 6 }}>
-        {label}
-      </label>
+      {label && (
+        <label style={{ display: "block", fontSize: "0.8125rem", fontWeight: 700, color: "#ffffff", marginBottom: 6 }}>
+          {label}
+        </label>
+      )}
+      {/* Fix Issue 11: Standardized minHeight to 40px matching input heights */}
       <div
         style={{
-          background: "rgba(255,255,255,0.05)",
-          border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 10,
-          padding: "6px 8px",
+          background: "#000000",
+          border: "1px solid #3f3f46",
+          borderRadius: 8,
+          padding: "4px 8px",
           display: "flex",
           flexWrap: "wrap",
-          gap: 5,
-          minHeight: 42,
+          alignItems: "center",
+          gap: 6,
+          minHeight: 40,
           cursor: "text",
+          boxSizing: "border-box",
         }}
-        onClick={() => (document.getElementById(`tag-input-${label}`) as HTMLInputElement)?.focus()}
+        onClick={() => (document.getElementById(inputId) as HTMLInputElement)?.focus()}
       >
-        {values.map((v) => (
-          <span key={v} className="tag" style={{ gap: 5 }}>
+        {currentValues.map((v) => (
+          <span
+            key={v}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              background: "#130a24",
+              border: "1px solid #7c3aed",
+              color: "#ddd6fe",
+              fontSize: "0.78rem",
+              fontWeight: 700,
+              padding: "2px 8px",
+              borderRadius: 6,
+            }}
+          >
             {v}
             <button
-              onClick={() => remove(v)}
+              type="button"
+              aria-label={`Remove ${v}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                remove(v);
+              }}
               style={{
                 background: "none",
                 border: "none",
@@ -69,7 +103,9 @@ export default function TagInput({ label, placeholder, values, onChange, suggest
                 cursor: "pointer",
                 padding: 0,
                 lineHeight: 1,
-                fontSize: "0.95rem",
+                fontSize: "1rem",
+                display: "flex",
+                alignItems: "center",
               }}
             >
               ×
@@ -77,7 +113,7 @@ export default function TagInput({ label, placeholder, values, onChange, suggest
           </span>
         ))}
         <input
-          id={`tag-input-${label}`}
+          id={inputId}
           value={input}
           onChange={(e) => {
             setInput(e.target.value);
@@ -86,19 +122,21 @@ export default function TagInput({ label, placeholder, values, onChange, suggest
           onKeyDown={onKeyDown}
           onFocus={() => setShowSuggestions(true)}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-          placeholder={values.length === 0 ? placeholder : ""}
+          placeholder={currentValues.length === 0 ? placeholder : ""}
           style={{
             background: "none",
             border: "none",
             outline: "none",
-            color: "var(--foreground)",
-            fontSize: "0.875rem",
+            color: "#ffffff",
+            fontSize: "0.85rem",
             flex: 1,
             minWidth: 120,
             padding: "2px 4px",
+            height: 28,
           }}
         />
       </div>
+
       {showSuggestions && filtered.length > 0 && (
         <div
           style={{
@@ -107,16 +145,18 @@ export default function TagInput({ label, placeholder, values, onChange, suggest
             left: 0,
             right: 0,
             marginTop: 4,
-            background: "rgba(15,15,35,0.98)",
-            border: "1px solid rgba(124,58,237,0.25)",
-            borderRadius: 10,
+            background: "#0c0c10",
+            border: "1px solid #7c3aed",
+            borderRadius: 8,
             zIndex: 100,
             overflow: "hidden",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.8)",
           }}
         >
           {filtered.slice(0, 6).map((s) => (
             <button
               key={s}
+              type="button"
               onMouseDown={() => add(s)}
               style={{
                 display: "block",
@@ -125,13 +165,13 @@ export default function TagInput({ label, placeholder, values, onChange, suggest
                 background: "none",
                 border: "none",
                 padding: "0.5rem 1rem",
-                color: "rgba(200,200,230,0.8)",
-                fontSize: "0.85rem",
+                color: "#e4e4e7",
+                fontSize: "0.8125rem",
                 cursor: "pointer",
                 transition: "background 0.15s",
               }}
               onMouseEnter={(e) =>
-                ((e.currentTarget as HTMLButtonElement).style.background = "rgba(124,58,237,0.15)")
+                ((e.currentTarget as HTMLButtonElement).style.background = "#1e1136")
               }
               onMouseLeave={(e) =>
                 ((e.currentTarget as HTMLButtonElement).style.background = "none")
@@ -142,7 +182,9 @@ export default function TagInput({ label, placeholder, values, onChange, suggest
           ))}
         </div>
       )}
-      <p style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: 4 }}>
+
+      {/* Fix Issue 2: Increased font size to >= 12px (0.8125rem = 13px) */}
+      <p style={{ fontSize: "0.8125rem", color: "#a1a1aa", marginTop: 5, marginBottom: 0 }}>
         Press Enter or comma to add
       </p>
     </div>

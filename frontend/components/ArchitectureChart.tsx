@@ -19,9 +19,18 @@ interface ArchChartProps {
   type?: "bar" | "pie";
 }
 
-const GRADIENT_COLORS = [
-  "#7c3aed", "#6d28d9", "#4f46e5", "#2563eb", "#0ea5e9",
-  "#06b6d4", "#10b981", "#059669", "#f59e0b", "#f97316",
+const BOLD_COLORS = [
+  "#7c3aed",
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#0284c7",
+  "#7c2d12",
+  "#4338ca",
+  "#047857",
+  "#b45309",
+  "#be123c",
 ];
 
 const CustomTooltip = ({ active, payload, label }: any) => {
@@ -29,17 +38,16 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     return (
       <div
         style={{
-          background: "rgba(15,15,35,0.95)",
-          border: "1px solid rgba(124,58,237,0.3)",
-          borderRadius: 8,
-          padding: "8px 14px",
+          background: "#000000",
+          border: "1px solid #7c3aed",
+          borderRadius: 6,
+          padding: "8px 12px",
           fontSize: "0.82rem",
-          color: "var(--foreground)",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+          color: "#ffffff",
         }}
       >
-        <p style={{ fontWeight: 600, marginBottom: 2 }}>{label || payload[0]?.name}</p>
-        <p style={{ color: "#a78bfa" }}>Count: {payload[0]?.value}</p>
+        <p style={{ fontWeight: 700, marginBottom: 2 }}>{label || payload[0]?.name}</p>
+        <p style={{ color: "#c4b5fd", fontWeight: 600 }}>Count: {payload[0]?.value}</p>
       </div>
     );
   }
@@ -71,25 +79,24 @@ export default function ArchitectureChart({ data, title, type = "bar" }: ArchCha
           >
             <XAxis
               type="number"
-              tick={{ fill: "rgba(200,200,230,0.4)", fontSize: 11 }}
-              axisLine={{ stroke: "rgba(255,255,255,0.06)" }}
+              tick={{ fill: "#a1a1aa", fontSize: 11, fontWeight: 600 }}
+              axisLine={{ stroke: "#27272a" }}
               tickLine={false}
             />
             <YAxis
               type="category"
               dataKey="name"
-              width={170}
-              tick={{ fill: "rgba(200,200,230,0.7)", fontSize: 11 }}
+              width={180}
+              tick={{ fill: "#f4f4f5", fontSize: 11, fontWeight: 600 }}
               axisLine={false}
               tickLine={false}
             />
-            <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(124,58,237,0.07)" }} />
-            <Bar dataKey="value" radius={[0, 6, 6, 0]} maxBarSize={18}>
+            <Tooltip content={<CustomTooltip />} cursor={{ fill: "#18181b" }} />
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18}>
               {chartData.map((_, i) => (
                 <Cell
                   key={i}
-                  fill={GRADIENT_COLORS[i % GRADIENT_COLORS.length]}
-                  fillOpacity={0.85}
+                  fill={BOLD_COLORS[i % BOLD_COLORS.length]}
                 />
               ))}
             </Bar>
@@ -102,28 +109,22 @@ export default function ArchitectureChart({ data, title, type = "bar" }: ArchCha
               data={chartData}
               cx="50%"
               cy="50%"
-              innerRadius={70}
-              outerRadius={110}
-              paddingAngle={3}
+              innerRadius={55}
+              outerRadius={95}
+              paddingAngle={2}
               dataKey="value"
-              nameKey="name"
             >
               {chartData.map((_, i) => (
                 <Cell
                   key={i}
-                  fill={GRADIENT_COLORS[i % GRADIENT_COLORS.length]}
-                  fillOpacity={0.9}
-                  stroke="rgba(7,7,17,0.5)"
-                  strokeWidth={2}
+                  fill={BOLD_COLORS[i % BOLD_COLORS.length]}
                 />
               ))}
             </Pie>
             <Tooltip content={<CustomTooltip />} />
             <Legend
-              formatter={(value: string) => (
-                <span style={{ color: "rgba(200,200,230,0.7)", fontSize: "0.78rem" }}>
-                  {value}
-                </span>
+              formatter={(value) => (
+                <span style={{ color: "#f4f4f5", fontSize: "0.78rem", fontWeight: 600 }}>{value}</span>
               )}
             />
           </PieChart>
