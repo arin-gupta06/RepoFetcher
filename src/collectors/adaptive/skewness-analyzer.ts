@@ -49,27 +49,30 @@ export class SkewnessAnalyzer {
     private static readonly EPSILON = 1e-9;
 
     /**
-     * Classifies count into 5-tier operational urgency system.
+     * Classifies relative share ratio (p_i / p_target) into 5-tier operational urgency system.
+     * Purely percentage and percentile based, avoiding fixed numerical counts.
      */
-    public static classifyTier(count: number): {
+    public static classifyTier(proportion: number, targetProportion: number): {
         tierLevel: 1 | 2 | 3 | 4 | 5;
         tierName: string;
         urgencyMultiplier: number;
     } {
-        const { TIERS } = ADAPTIVE_CONFIG;
-        if (count < TIERS.EMERGENCY.maxCount) {
-            return { tierLevel: 1, tierName: TIERS.EMERGENCY.name, urgencyMultiplier: TIERS.EMERGENCY.urgencyMultiplier };
+        const { PERCENTAGE_TIERS } = ADAPTIVE_CONFIG;
+        const shareRatio = targetProportion > 0 ? proportion / targetProportion : 1.0;
+
+        if (shareRatio < PERCENTAGE_TIERS.EMERGENCY.maxShareRatio) {
+            return { tierLevel: 1, tierName: PERCENTAGE_TIERS.EMERGENCY.name, urgencyMultiplier: PERCENTAGE_TIERS.EMERGENCY.urgencyMultiplier };
         }
-        if (count < TIERS.CRITICAL.maxCount) {
-            return { tierLevel: 2, tierName: TIERS.CRITICAL.name, urgencyMultiplier: TIERS.CRITICAL.urgencyMultiplier };
+        if (shareRatio < PERCENTAGE_TIERS.CRITICAL.maxShareRatio) {
+            return { tierLevel: 2, tierName: PERCENTAGE_TIERS.CRITICAL.name, urgencyMultiplier: PERCENTAGE_TIERS.CRITICAL.urgencyMultiplier };
         }
-        if (count < TIERS.DEVELOPING.maxCount) {
-            return { tierLevel: 3, tierName: TIERS.DEVELOPING.name, urgencyMultiplier: TIERS.DEVELOPING.urgencyMultiplier };
+        if (shareRatio < PERCENTAGE_TIERS.DEVELOPING.maxShareRatio) {
+            return { tierLevel: 3, tierName: PERCENTAGE_TIERS.DEVELOPING.name, urgencyMultiplier: PERCENTAGE_TIERS.DEVELOPING.urgencyMultiplier };
         }
-        if (count < TIERS.USABLE.maxCount) {
-            return { tierLevel: 4, tierName: TIERS.USABLE.name, urgencyMultiplier: TIERS.USABLE.urgencyMultiplier };
+        if (shareRatio < PERCENTAGE_TIERS.USABLE.maxShareRatio) {
+            return { tierLevel: 4, tierName: PERCENTAGE_TIERS.USABLE.name, urgencyMultiplier: PERCENTAGE_TIERS.USABLE.urgencyMultiplier };
         }
-        return { tierLevel: 5, tierName: TIERS.SATURATED.name, urgencyMultiplier: TIERS.SATURATED.urgencyMultiplier };
+        return { tierLevel: 5, tierName: PERCENTAGE_TIERS.SATURATED.name, urgencyMultiplier: PERCENTAGE_TIERS.SATURATED.urgencyMultiplier };
     }
 
     /**
@@ -114,20 +117,21 @@ export class SkewnessAnalyzer {
 
             // Deficit: how far below target proportion (relative to target)
             const deficitRatio = (targetProportion - proportion) / targetProportion;
-            const tier = this.classifyTier(count);
+            const tier = this.classifyTier(proportion, targetProportion);
 
             // Water-Filling priority weight incorporates tier urgency multiplier
+            // If category is saturated (Tier 5), its priority weight is strictly 0!
             const positiveDeficit = Math.max(0, deficitRatio);
             const priorityWeight =
                 positiveDeficit > 0 && tier.tierLevel < 5
                     ? Math.pow(positiveDeficit, gamma) * (1 / Math.pow(count + 1, alpha)) * tier.urgencyMultiplier
                     : 0;
 
-            // Classify status based on configurable thresholds
+            // Classify status based on percentage tiers
             let status: BucketStatus = "balanced";
-            if (tier.tierLevel <= 2 || proportion < 0.4 * targetProportion) {
+            if (tier.tierLevel <= 2) {
                 status = "starved";
-            } else if (tier.tierLevel === 5 || proportion > 1.5 * targetProportion) {
+            } else if (tier.tierLevel === 5) {
                 status = "saturated";
             }
 

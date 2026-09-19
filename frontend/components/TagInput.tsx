@@ -9,6 +9,7 @@ export interface TagInputProps {
   tags?: string[];
   onChange: (values: string[]) => void;
   suggestions?: string[];
+  disabled?: boolean;
 }
 
 export default function TagInput({
@@ -18,6 +19,7 @@ export default function TagInput({
   tags,
   onChange,
   suggestions = [],
+  disabled = false,
 }: TagInputProps) {
   const currentValues = values ?? tags ?? [];
   const [input, setInput] = useState("");
@@ -29,6 +31,7 @@ export default function TagInput({
   );
 
   const add = (val: string) => {
+    if (disabled) return;
     const trimmed = val.trim();
     if (trimmed && !currentValues.includes(trimmed)) {
       onChange([...currentValues, trimmed]);
@@ -37,9 +40,13 @@ export default function TagInput({
     setShowSuggestions(false);
   };
 
-  const remove = (val: string) => onChange(currentValues.filter((v) => v !== val));
+  const remove = (val: string) => {
+    if (disabled) return;
+    onChange(currentValues.filter((v) => v !== val));
+  };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (disabled) return;
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       add(input);
@@ -55,11 +62,10 @@ export default function TagInput({
           {label}
         </label>
       )}
-      {/* Fix Issue 11: Standardized minHeight to 40px matching input heights */}
       <div
         style={{
-          background: "#000000",
-          border: "1px solid #3f3f46",
+          background: disabled ? "#0f0f13" : "#000000",
+          border: `1px solid ${disabled ? "#27272a" : "#3f3f46"}`,
           borderRadius: 8,
           padding: "4px 8px",
           display: "flex",
@@ -67,10 +73,15 @@ export default function TagInput({
           alignItems: "center",
           gap: 6,
           minHeight: 40,
-          cursor: "text",
+          cursor: disabled ? "not-allowed" : "text",
           boxSizing: "border-box",
+          opacity: disabled ? 0.9 : 1,
         }}
-        onClick={() => (document.getElementById(inputId) as HTMLInputElement)?.focus()}
+        onClick={() => {
+          if (!disabled) {
+            (document.getElementById(inputId) as HTMLInputElement)?.focus();
+          }
+        }}
       >
         {currentValues.map((v) => (
           <span
@@ -79,9 +90,9 @@ export default function TagInput({
               display: "inline-flex",
               alignItems: "center",
               gap: 5,
-              background: "#130a24",
-              border: "1px solid #7c3aed",
-              color: "#ddd6fe",
+              background: disabled ? "#18181b" : "#130a24",
+              border: `1px solid ${disabled ? "#3f3f46" : "#7c3aed"}`,
+              color: disabled ? "#a1a1aa" : "#ddd6fe",
               fontSize: "0.78rem",
               fontWeight: 700,
               padding: "2px 8px",
@@ -89,55 +100,59 @@ export default function TagInput({
             }}
           >
             {v}
-            <button
-              type="button"
-              aria-label={`Remove ${v}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                remove(v);
-              }}
-              style={{
-                background: "none",
-                border: "none",
-                color: "#c4b5fd",
-                cursor: "pointer",
-                padding: 0,
-                lineHeight: 1,
-                fontSize: "1rem",
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              ×
-            </button>
+            {!disabled && (
+              <button
+                type="button"
+                aria-label={`Remove ${v}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  remove(v);
+                }}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#c4b5fd",
+                  cursor: "pointer",
+                  padding: 0,
+                  lineHeight: 1,
+                  fontSize: "1rem",
+                  display: "flex",
+                  alignItems: "center",
+                }}
+              >
+                ×
+              </button>
+            )}
           </span>
         ))}
-        <input
-          id={inputId}
-          value={input}
-          onChange={(e) => {
-            setInput(e.target.value);
-            setShowSuggestions(true);
-          }}
-          onKeyDown={onKeyDown}
-          onFocus={() => setShowSuggestions(true)}
-          onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-          placeholder={currentValues.length === 0 ? placeholder : ""}
-          style={{
-            background: "none",
-            border: "none",
-            outline: "none",
-            color: "#ffffff",
-            fontSize: "0.85rem",
-            flex: 1,
-            minWidth: 120,
-            padding: "2px 4px",
-            height: 28,
-          }}
-        />
+        {!disabled && (
+          <input
+            id={inputId}
+            value={input}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setShowSuggestions(true);
+            }}
+            onKeyDown={onKeyDown}
+            onFocus={() => setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            placeholder={currentValues.length === 0 ? placeholder : ""}
+            style={{
+              background: "none",
+              border: "none",
+              outline: "none",
+              color: "#ffffff",
+              fontSize: "0.85rem",
+              flex: 1,
+              minWidth: 120,
+              padding: "2px 4px",
+              height: 28,
+            }}
+          />
+        )}
       </div>
 
-      {showSuggestions && filtered.length > 0 && (
+      {!disabled && showSuggestions && filtered.length > 0 && (
         <div
           style={{
             position: "absolute",
@@ -183,9 +198,8 @@ export default function TagInput({
         </div>
       )}
 
-      {/* Fix Issue 2: Increased font size to >= 12px (0.8125rem = 13px) */}
-      <p style={{ fontSize: "0.8125rem", color: "#a1a1aa", marginTop: 5, marginBottom: 0 }}>
-        Press Enter or comma to add
+      <p style={{ fontSize: "0.8125rem", color: disabled ? "#71717a" : "#a1a1aa", marginTop: 5, marginBottom: 0 }}>
+        {disabled ? "Locked to fetched repository metadata" : "Press Enter or comma to add"}
       </p>
     </div>
   );

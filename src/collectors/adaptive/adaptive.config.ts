@@ -5,48 +5,50 @@
 
 export interface TierConfig {
   name: string;
-  maxCount: number;
+  maxShareRatio: number; // Ratio of actual proportion to target proportion (p_i / p_target)
   urgencyMultiplier: number;
   rationale: string;
 }
 
 export const ADAPTIVE_CONFIG = {
-  // 5-Tier Urgency Thresholds (based on existing sample counts)
-  TIERS: {
+  // Percentage & Relative Proportion Thresholds (No arbitrary fixed numbers)
+  // p_target = 1 / K (uniform share)
+  // ratio = p_i / p_target
+  PERCENTAGE_TIERS: {
     EMERGENCY: {
-      name: "Tier 1: Emergency Deficit",
-      maxCount: 5,
+      name: "Tier 1: Emergency Deficit (Severe Minority)",
+      maxShareRatio: 0.25, // < 25% of fair uniform share
       urgencyMultiplier: 5.0,
-      rationale: "Extreme data starvation (< 5 samples); risk of model blindness.",
+      rationale: "Extreme minority (< 25% of equilibrium share); high risk of model blindness.",
     },
     CRITICAL: {
-      name: "Tier 2: Critical Deficit",
-      maxCount: 15,
+      name: "Tier 2: Critical Deficit (Minority)",
+      maxShareRatio: 0.60, // 25% - 60% of fair uniform share
       urgencyMultiplier: 3.0,
-      rationale: "Under minimum threshold for reliable cross-validation (5-14 samples).",
+      rationale: "Underrepresented minority (25% - 60% of equilibrium share).",
     },
     DEVELOPING: {
       name: "Tier 3: Developing Deficit",
-      maxCount: 30,
-      urgencyMultiplier: 1.8,
-      rationale: "Present but underrepresented (15-29 samples).",
+      maxShareRatio: 1.00, // 60% - 100% of fair uniform share
+      urgencyMultiplier: 1.5,
+      rationale: "Approaching equilibrium but still in deficit (60% - 100% of equilibrium share).",
     },
     USABLE: {
-      name: "Tier 4: Usable Representation",
-      maxCount: 60,
-      urgencyMultiplier: 1.0,
-      rationale: "Adequate baseline representation (30-59 samples).",
+      name: "Tier 4: Balanced / Usable",
+      maxShareRatio: 1.30, // 100% - 130% of fair uniform share
+      urgencyMultiplier: 0.5,
+      rationale: "Balanced content level; minimal harvesting needed.",
     },
     SATURATED: {
-      name: "Tier 5: Saturated",
-      maxCount: Infinity,
-      urgencyMultiplier: 0.0, // Frozen/paused: 0% quota
-      rationale: "Over-represented (60+ samples); paused to prevent dataset skew.",
+      name: "Tier 5: Saturated (Harvesting Stopped)",
+      maxShareRatio: Infinity, // >= 130% of fair uniform share
+      urgencyMultiplier: 0.0, // Strictly 0 quota: paused
+      rationale: "Exceeds saturation content level (> 130% of equilibrium share); permanently paused.",
     },
   },
 
-  // Target equilibrium per valid programming language and architecture pattern
-  TARGET_PER_BUCKET: 60,
+  // Saturation threshold multiplier above uniform share (1.3x = 130%)
+  SATURATION_SHARE_RATIO: 1.30,
 
   // Architecture Evidence Safety Gate thresholds
   MIN_EVIDENCE_SCORE: 0.40,
@@ -54,8 +56,8 @@ export const ADAPTIVE_CONFIG = {
 
   // Water-Filling Batch Allocation Limits
   EXECUTION_SPLIT: {
-    TIER_1_2_SHARE: 0.75, // At least 75% of capacity reserved for Emergency/Critical
-    TIER_3_4_SHARE: 0.25, // Remaining 25% for Developing/Usable
+    TIER_1_2_SHARE: 0.85, // 85% of harvest capacity strictly reserved for Emergency/Critical minorities
+    TIER_3_4_SHARE: 0.15, // 15% for Developing deficits
     TIER_5_SHARE: 0.00,   // Strictly 0% for Saturated categories
   },
 

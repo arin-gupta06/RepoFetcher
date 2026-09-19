@@ -62,6 +62,7 @@ def parse_repo_slug(url_or_slug: str) -> Optional[tuple[str, str]]:
       - https://github.com/expressjs/express.git
       - github.com/expressjs/express
       - git@github.com:expressjs/express.git
+      - https://api.github.com/repos/expressjs/express
       - expressjs/express
     """
     clean = url_or_slug.strip().replace(".git", "")
@@ -70,6 +71,8 @@ def parse_repo_slug(url_or_slug: str) -> Optional[tuple[str, str]]:
     if clean.startswith("git@github.com:"):
         clean = clean.replace("git@github.com:", "")
     
+    # Handle https://api.github.com/repos/owner/repo
+    clean = re.sub(r"^https?://(www\.)?api\.github\.com/repos/", "", clean)
     # Handle https://github.com/owner/repo or http://
     clean = re.sub(r"^https?://(www\.)?github\.com/", "", clean)
     clean = re.sub(r"^github\.com/", "", clean)
@@ -113,17 +116,27 @@ def detect_repository_metadata(repo_url_or_slug: str) -> dict[str, Any]:
         )
 
     owner, repo = parsed
-    headers = {"Accept": "application/vnd.github.v3+json"}
+    headers = {"Accept": "application/vnd.github.v3+json", "User-Agent": "RepoLens-AI"}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
 
     # 1. Fetch Repository Metadata
     repo_api_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}"
     resp = requests.get(repo_api_url, headers=headers, timeout=10)
+    if resp.status_code == 401 and GITHUB_TOKEN:
+        # Fallback to unauthenticated request if provided token is unauthorized
+        headers.pop("Authorization", None)
+        resp = requests.get(repo_api_url, headers=headers, timeout=10)
+
     if resp.status_code == 404:
         raise ValueError(f"Repository '{owner}/{repo}' not found on GitHub.")
     if resp.status_code != 200:
-        raise ValueError(f"GitHub API error ({resp.status_code}): {resp.text}")
+        err_msg = ""
+        try:
+            err_msg = resp.json().get("message", resp.text)
+        except Exception:
+            err_msg = resp.text
+        raise ValueError(f"GitHub API error ({resp.status_code}): {err_msg}")
 
     repo_data = resp.json()
     full_name = repo_data.get("full_name", f"{owner}/{repo}")

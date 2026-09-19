@@ -400,7 +400,8 @@ def predict(repo: RepoMetadata) -> PredictResponse:
 # ---------------------------------------------------------------------------
 
 class DetectRepoRequest(BaseModel):
-    url: str = Field(..., examples=["https://github.com/expressjs/express"])
+    url: Optional[str] = Field(default=None, examples=["https://github.com/expressjs/express"])
+    github_url: Optional[str] = Field(default=None, examples=["https://github.com/expressjs/express"])
 
 
 class DetectRepoResponse(BaseModel):
@@ -415,14 +416,21 @@ class DetectRepoResponse(BaseModel):
 
 
 @app.post("/detect-repo", response_model=DetectRepoResponse, tags=["Detector"])
+@app.post("/detect-github", response_model=DetectRepoResponse, tags=["Detector"])
 def detect_repo_endpoint(req: DetectRepoRequest) -> DetectRepoResponse:
     """
     Given a GitHub URL or slug (e.g. 'expressjs/express' or 'https://github.com/expressjs/express'),
     fetches live repository metadata, stars, language, frameworks, layers, and README snippet
     to automatically populate the client-side architecture analysis form.
     """
+    target = (req.url or req.github_url or "").strip()
+    if not target:
+        raise HTTPException(
+            status_code=400,
+            detail="Repository URL or slug is required (e.g. 'expressjs/express' or 'https://github.com/expressjs/express')."
+        )
     try:
-        data = detect_repository_metadata(req.url)
+        data = detect_repository_metadata(target)
         return DetectRepoResponse(**data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -497,6 +505,6 @@ def analyze_idea_endpoint(req: IdeaRequest) -> IdeaAnalysisResponse:
             concepts=signals.concepts,
         ),
         total_repos_searched=len(list(
-            open(Path(__file__).parent.parent / "data" / "model_ready" / "cleaned_repository_samples.jsonl")
+            open(Path(__file__).parent.parent / "data" / "model_ready" / "cleaned_repository_samples.jsonl", encoding="utf-8")
         )) if (Path(__file__).parent.parent / "data" / "model_ready" / "cleaned_repository_samples.jsonl").exists() else 0,
     )

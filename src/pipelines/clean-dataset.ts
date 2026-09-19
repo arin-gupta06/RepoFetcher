@@ -116,9 +116,25 @@ async function runDatasetCleaningPipeline() {
 
   console.log(`📦 Total raw repositories to process: ${rawRepos.length}`);
 
+  const NON_CODE = new Set([
+    "unknown", "none", "", "html", "css", "scss", "dockerfile", "makefile", "jupyter notebook", "shell", "hcl", "cue"
+  ]);
+
+  const filteredRepos = rawRepos.filter((repo) => {
+    const lang = (repo.language || "").trim().toLowerCase();
+    if (NON_CODE.has(lang)) return false;
+    const url = repo.url || "";
+    const owner = repo.owner?.login || "";
+    if (!url.startsWith("http") || url.includes("unknown") || !owner || owner === "unknown") return false;
+    const cleanReadme = (repo.readme?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return cleanReadme.length >= 80;
+  });
+
+  console.log(`🧹 Retained ${filteredRepos.length} high-hygiene repositories for modeling.`);
+
   // 2. Normalize and clean samples
   console.log("\n🧹 Cleaning text and normalizing features...");
-  const cleanedSamples: CleanedRepositorySample[] = rawRepos.map((repo) => {
+  const cleanedSamples: CleanedRepositorySample[] = filteredRepos.map((repo) => {
     const fg = fingerprintsMap.get(repo.id);
     return FeatureNormalizer.normalizeSample(repo, fg);
   });

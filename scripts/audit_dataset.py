@@ -7,8 +7,12 @@ and determine whether modeling should be single-label multi-class or multi-label
 from __future__ import annotations
 
 import json
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent

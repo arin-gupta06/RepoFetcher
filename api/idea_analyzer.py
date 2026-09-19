@@ -128,6 +128,7 @@ class RepoSignals:
     total_files: int
     source_tier: str
     readme_snippet: str
+    id: Optional[int] = None
 
     @property
     def github_url(self) -> str:
@@ -177,6 +178,7 @@ def _load_repos() -> list[RepoSignals]:
                 obj = json.loads(line)
                 repos.append(
                     RepoSignals(
+                        id=obj.get("id"),
                         full_name=obj.get("fullName", "unknown/repo"),
                         language=obj.get("language", ""),
                         frameworks=[fw for fw in obj.get("detectedFrameworks", [])],
@@ -216,9 +218,13 @@ def _extract_signals(idea_text: str) -> IdeaSignals:
     return signals
 
 
-def _score_repo(repo: RepoSignals, signals: IdeaSignals) -> tuple[int, list[str], str]:
+def _score_repo(
+    repo: RepoSignals,
+    signals: IdeaSignals,
+    semantic_sim: Optional[float] = None,
+) -> tuple[int, list[str], str]:
     """
-    Score a repo against extracted idea signals.
+    Score a repo against extracted idea signals and neural semantic similarity.
     Returns (match_pct 0-100, matched_signal_labels, rationale_string).
     """
     score = 0.0
@@ -296,11 +302,26 @@ def _score_repo(repo: RepoSignals, signals: IdeaSignals) -> tuple[int, list[str]
     # Normalise to 0–100
     raw_pct = (score / max_score) * 100 if max_score > 0 else 0
 
+    if semantic_sim is not None:
+        # Scale cosine similarity (typically 0.20 - 0.95) to 0 - 100%
+        semantic_scaled = min(100.0, max(0.0, (semantic_sim - 0.20) / 0.75 * 100.0))
+        if signals.languages or signals.frameworks or signals.patterns or signals.concepts:
+            # Multi-modal blend: 50% neural semantic adherence + 50% keyword signal alignment
+            blended_pct = 0.50 * raw_pct + 0.50 * semantic_scaled
+        else:
+            # Free text idea without explicit syntax keywords: 85% neural semantic adherence
+            blended_pct = 0.85 * semantic_scaled + 0.15 * raw_pct
+
+        if semantic_sim >= 0.65:
+            matched.append(f"DistilBERT ({int(semantic_sim * 100)}%)")
+            reasons.append(f"DistilBERT neural semantic adherence ({int(semantic_sim * 100)}%)")
+        raw_pct = blended_pct
+
     # Add small diversity jitter based on stars (helps differentiate similar scores)
-    stars_boost = min(5, math.log10(max(repo.stars, 1)) * 0.5)
+    stars_boost = min(4, math.log10(max(repo.stars, 1)) * 0.4)
     raw_pct = min(98, raw_pct + stars_boost)
 
-    match_pct = max(5, round(raw_pct))
+    match_pct = max(10, round(raw_pct))
 
     # Build rationale
     if not reasons:
@@ -313,15 +334,36 @@ def _score_repo(repo: RepoSignals, signals: IdeaSignals) -> tuple[int, list[str]
 
 def analyze_idea(idea_text: str, top_n: int = 8) -> tuple[list[RepoMatch], IdeaSignals]:
     """
-    Main entry point.
+    Main entry point combining DistilBERT neural embeddings and structural signals.
     Returns (top-N RepoMatch objects, extracted IdeaSignals).
     """
     signals = _extract_signals(idea_text)
     repos = _load_repos()
 
+    # DistilBERT Semantic Similarity
+    sim_by_id: dict[int, float] = {}
+    try:
+        from model import extract_dense_embedding, _init_models
+        import model
+        _init_models()
+        dense_vec = extract_dense_embedding(idea_text)
+        dense_matrix = model._REPO_EMBEDDINGS_DENSE
+        repo_meta = model._REPO_METADATA
+
+        if dense_vec is not None and dense_matrix is not None and repo_meta:
+            sims = dense_matrix.dot(dense_vec)
+            for idx, s_val in enumerate(sims):
+                if idx < len(repo_meta):
+                    rid = repo_meta[idx].get("id")
+                    if rid is not None:
+                        sim_by_id[rid] = float(s_val)
+    except Exception as e:
+        print(f"[Warning] Failed DistilBERT idea similarity calculation: {e}")
+
     scored: list[tuple[int, RepoSignals, list[str], str]] = []
     for repo in repos:
-        pct, matched_signals, rationale = _score_repo(repo, signals)
+        sem_sim = sim_by_id.get(repo.id) if repo.id is not None else None
+        pct, matched_signals, rationale = _score_repo(repo, signals, semantic_sim=sem_sim)
         scored.append((pct, repo, matched_signals, rationale))
 
     # Sort descending by match %, then descending by stars for tie-breaking

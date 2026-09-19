@@ -38,3 +38,15 @@ pnpm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Large Model Weights (> 100MB exceeds GitHub push limit)
+*.safetensors
+*.bin
+models/distilbert/*.safetensors
+models/distilbert_base/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+api/__pycache__/

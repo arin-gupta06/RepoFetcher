@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,8 @@ import numpy as np
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 MODELS_DIR = BASE_DIR / "models"
+DISTILBERT_DIR = MODELS_DIR / "distilbert"
+DENSE_EMBEDDINGS_PATH = MODELS_DIR / "repo_embeddings_dense.npy"
 SAMPLES_PATH = DATA_DIR / "model_ready" / "cleaned_repository_samples.jsonl"
 DIAGRAMS_PATH = DATA_DIR / "diagrams.jsonl"
 
@@ -189,10 +192,38 @@ _REPO_METADATA: list[dict[str, Any]] = []
 _MODEL_METADATA: dict[str, Any] = {}
 _MODELS_LOADED = False
 
+# DistilBERT Transformer Components
+_DISTILBERT_TOKENIZER = None
+_DISTILBERT_MODEL = None
+_DISTILBERT_CLASSIFIER_HEAD = None
+_DISTILBERT_CONFIG: dict[str, Any] = {}
+_REPO_EMBEDDINGS_DENSE: Optional[np.ndarray] = None
+
+
+import torch
+import torch.nn as nn
+
+
+class ArchitectureClassifierHead(nn.Module):
+    """PyTorch classification head matching training schema."""
+    def __init__(self, in_features: int = 768, hidden_dim: int = 256, num_classes: int = 40):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(in_features, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.25),
+            nn.Linear(hidden_dim, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
 
 def _init_models():
-    """Loads serialized semantic vectorizer, classifier, embeddings, and metadata once into memory."""
-    global _VECTORIZER, _CLASSIFIER, _LABEL_ENCODER, _REPO_EMBEDDINGS, _REPO_METADATA, _MODEL_METADATA, _MODELS_LOADED
+    """Loads serialized semantic vectorizer, DistilBERT transformer, embeddings, and metadata once into memory."""
+    global _VECTORIZER, _CLASSIFIER, _LABEL_ENCODER, _REPO_EMBEDDINGS, _REPO_METADATA, _MODEL_METADATA
+    global _DISTILBERT_TOKENIZER, _DISTILBERT_MODEL, _DISTILBERT_CLASSIFIER_HEAD, _DISTILBERT_CONFIG, _REPO_EMBEDDINGS_DENSE, _MODELS_LOADED
     if _MODELS_LOADED:
         return
 
@@ -222,9 +253,62 @@ def _init_models():
             with open(m_meta_path, encoding="utf-8") as f:
                 _MODEL_METADATA = json.load(f)
 
-        _MODELS_LOADED = True
+        # 1. Load DistilBERT dense embeddings
+        if DENSE_EMBEDDINGS_PATH.exists():
+            dense_arr = np.load(DENSE_EMBEDDINGS_PATH)
+            _REPO_EMBEDDINGS_DENSE = dense_arr
+            print(f"[Model] Loaded DistilBERT dense embeddings: {dense_arr.shape}")
+
+        # 2. Load DistilBERT tokenizer, model, and classification head
+        if DISTILBERT_DIR.exists():
+            arch_cfg_path = DISTILBERT_DIR / "architecture_config.json"
+            if arch_cfg_path.exists():
+                with open(arch_cfg_path, encoding="utf-8") as f:
+                    _DISTILBERT_CONFIG = json.load(f)
+
+            from transformers import AutoTokenizer, AutoModel
+
+            safetensors_path = DISTILBERT_DIR / "model.safetensors"
+            model_target = str(DISTILBERT_DIR) if safetensors_path.exists() else "distilbert-base-uncased"
+            local_only = safetensors_path.exists()
+
+            _DISTILBERT_TOKENIZER = AutoTokenizer.from_pretrained(model_target, local_files_only=local_only)
+            _DISTILBERT_MODEL = AutoModel.from_pretrained(model_target, local_files_only=local_only)
+            _DISTILBERT_MODEL.eval()
+
+            head_path = DISTILBERT_DIR / "classifier_head.pt"
+            if head_path.exists() and _DISTILBERT_CONFIG:
+                num_classes = _DISTILBERT_CONFIG.get("num_classes", 40)
+                head = ArchitectureClassifierHead(in_features=768, hidden_dim=256, num_classes=num_classes)
+                head.load_state_dict(torch.load(head_path, map_location="cpu"))
+                head.eval()
+                _DISTILBERT_CLASSIFIER_HEAD = head
+                print(f"[Model] Loaded DistilBERT architecture classifier head ({num_classes} classes).")
+
     except Exception as e:
         print(f"[Warning] Failed to load semantic model artifacts: {e}")
+    finally:
+        _MODELS_LOADED = True
+
+
+def extract_dense_embedding(text: str) -> Optional[np.ndarray]:
+    """Extract normalized 768-dim semantic embedding using DistilBERT."""
+    _init_models()
+    if _DISTILBERT_MODEL is None or _DISTILBERT_TOKENIZER is None:
+        return None
+    try:
+        import torch
+        enc = _DISTILBERT_TOKENIZER(text, return_tensors="pt", truncation=True, max_length=128)
+        with torch.no_grad():
+            out = _DISTILBERT_MODEL(**enc)
+            tok_emb = out[0]
+            mask = enc["attention_mask"].unsqueeze(-1).expand(tok_emb.size()).float()
+            pooled = torch.sum(tok_emb * mask, 1) / torch.clamp(mask.sum(1), min=1e-9)
+            norm = torch.norm(pooled, p=2, dim=1, keepdim=True)
+            return (pooled / norm).cpu().numpy()[0]
+    except Exception as e:
+        print(f"[Warning] Failed to extract DistilBERT embedding: {e}")
+        return None
 
 
 def build_rich_text(
@@ -236,23 +320,15 @@ def build_rich_text(
     has_arch_docs: bool = False,
     source_tier: str = "tier_3_verified_oss",
 ) -> str:
-    """Canonical feature builder matching notebooks/train_and_serialize.py."""
-    tokens: list[str] = []
-    lang = language or "unknown"
-    tokens.append(f"language_{lang.lower().replace(' ', '_').replace('#', 'sharp')}")
-    tokens.append(f"sourcetier_{source_tier.lower()}")
-    for fw in frameworks:
-        tokens.append(f"framework_{fw.lower().replace(' ', '_').replace('.', '')}")
-    for l in layers:
-        tokens.append(f"layer_{l.lower().replace(' ', '_')}")
-    if repo_name:
-        slug_clean = re.sub(r"[/_-]", " ", repo_name.lower())
-        tokens.append(slug_clean)
-    if has_arch_docs:
-        tokens.append("architecture documentation adr design c4 specification")
-    if readme_snippet:
-        tokens.append(readme_snippet[:2500])
-    return " ".join(tokens)
+    """Canonical feature builder matching scripts/train_distilbert.py."""
+    lang = (language or "unknown").lower().replace(" ", "_").replace("#", "sharp")
+    tier = (source_tier or "tier_3").lower()
+    fws = " ".join([f"framework_{f.lower().replace(' ', '_').replace('.', '')}" for f in frameworks])
+    lyrs = " ".join([f"layer_{l.lower().replace(' ', '_')}" for l in layers])
+    name = (repo_name or "").replace("/", " ").replace("-", " ").replace("_", " ")
+    docs = "architecture documentation" if has_arch_docs else ""
+    readme = (readme_snippet or "")[:800]
+    return f"language_{lang} sourcetier_{tier} {fws} {lyrs} {name} {docs} {readme}".strip()
 
 
 # ---------------------------------------------------------------------------
@@ -717,10 +793,11 @@ def find_closest_match_and_diagram(
     top_pattern: str,
     subdomains: list[FunctionalSubdomain],
     query_vector=None,
+    dense_vector: Optional[np.ndarray] = None,
 ) -> tuple[ClosestBenchmarkMatch, Optional[RecommendedDiagram], AnalysisStatistics]:
     """
     Two-Stage Context-Aware Benchmark & Diagram Retrieval:
-    1. Vector Cosine Similarity Search across 3,265 precomputed repo embeddings.
+    1. Dense DistilBERT Semantic Embedding Dot-Product Search across 3,305 clean repo embeddings.
     2. Architecture-Aware Reranking combining semantic similarity, pattern alignment,
        framework compatibility, and language match.
     3. Strict Diagram Verification: exact repo match -> exact pattern match -> None (Mermaid flow).
@@ -749,7 +826,15 @@ def find_closest_match_and_diagram(
 
     # Stage 1: Candidate Retrieval using Precomputed Embeddings
     candidates_pool = []
-    if _REPO_EMBEDDINGS is not None and query_vector is not None and len(_REPO_METADATA) > 0:
+    if _REPO_EMBEDDINGS_DENSE is not None and dense_vector is not None and len(_REPO_METADATA) > 0:
+        sims = _REPO_EMBEDDINGS_DENSE.dot(dense_vector)
+        top_indices = np.argsort(sims)[::-1][:30]
+        for idx in top_indices:
+            if idx < len(_REPO_METADATA):
+                meta = dict(_REPO_METADATA[idx])
+                meta["_cosine_sim"] = float(sims[idx])
+                candidates_pool.append(meta)
+    elif _REPO_EMBEDDINGS is not None and query_vector is not None and len(_REPO_METADATA) > 0:
         from sklearn.preprocessing import normalize as sk_norm
         q_norm = sk_norm(query_vector, norm="l2", copy=False)
         sims = _REPO_EMBEDDINGS.dot(q_norm.T).toarray().ravel()
@@ -831,14 +916,16 @@ def find_closest_match_and_diagram(
             reliability_score=rel_score,
         )
 
-    full_name_val = best_repo.get("fullName")
-    full_name: str = str(full_name_val) if full_name_val else f"{best_repo.get('owner', 'unknown')}/{best_repo.get('name', 'repo')}"
+    full_name_val = best_repo.get("full_name") or best_repo.get("fullName")
+    full_name: str = str(full_name_val) if full_name_val else f"{best_repo.get('owner', 'github')}/{best_repo.get('name', 'repo')}"
+    if "/" in full_name and full_name.startswith("unknown/"):
+        full_name = full_name.replace("unknown/", "")
 
     owner_val = best_repo.get("owner")
     owner_str: str = ""
     if isinstance(owner_val, dict):
-        owner_str = str(owner_val.get("login") or "unknown")
-    elif isinstance(owner_val, str) and owner_val:
+        owner_str = str(owner_val.get("login") or "github")
+    elif isinstance(owner_val, str) and owner_val and owner_val != "unknown":
         owner_str = owner_val
     else:
         owner_str = full_name.split("/")[0] if "/" in full_name else "github"
@@ -847,8 +934,8 @@ def find_closest_match_and_diagram(
     name_str: str = str(name_val) if name_val else (full_name.split("/")[-1] if "/" in full_name else full_name)
     stars_raw = best_repo.get("stars", 0)
     stars_int: int = int(stars_raw) if isinstance(stars_raw, (int, float)) else 0
-    tier_str: str = str(best_repo.get("sourceTier") or "tier_3_verified_oss")
-    pattern_str: str = str(best_repo.get("architecturePattern") or top_pattern)
+    tier_str: str = str(best_repo.get("source_tier") or best_repo.get("sourceTier") or "tier_3_verified_oss")
+    pattern_str: str = str(best_repo.get("architecture_pattern") or best_repo.get("architecturePattern") or top_pattern)
 
     closest = ClosestBenchmarkMatch(
         name=name_str,
@@ -969,7 +1056,7 @@ def predict_architecture(
         repo_name=repo_name,
     )
 
-    # 3. Universal Semantic ML Scoring Pipeline
+    # 3. Universal Semantic ML Scoring Pipeline (DistilBERT Primary + TF-IDF Fallback)
     _init_models()
     rich_text = build_rich_text(
         language=language,
@@ -980,8 +1067,45 @@ def predict_architecture(
         has_arch_docs=has_arch_docs,
     )
 
+    dense_vec = extract_dense_embedding(rich_text)
     query_vec = None
-    if _CLASSIFIER is not None and _VECTORIZER is not None and _LABEL_ENCODER is not None:
+
+    if _DISTILBERT_CLASSIFIER_HEAD is not None and _DISTILBERT_CONFIG and dense_vec is not None:
+        import torch
+        dense_tensor = torch.tensor(dense_vec, dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            logits = _DISTILBERT_CLASSIFIER_HEAD(dense_tensor)
+            distil_probs = torch.softmax(logits, dim=-1).cpu().numpy()[0]
+        top_k_indices = np.argsort(distil_probs)[::-1]
+
+        candidates = []
+        classes_list = _DISTILBERT_CONFIG.get("classes", [])
+        for rank, idx in enumerate(top_k_indices[:4]):
+            pattern_name = classes_list[idx] if idx < len(classes_list) else "General Modular Architecture"
+            conf = float(distil_probs[idx])
+            evidence = []
+            if frameworks:
+                evidence.append(f"Framework alignment: {', '.join(frameworks[:3])}")
+            if cleaned_layers:
+                evidence.append(f"Structural layers: {', '.join(cleaned_layers[:4])}")
+            if has_arch_docs:
+                evidence.append("Verified architecture documentation detected")
+            if rank == 0:
+                evidence.append(f"DistilBERT Transformer Semantic Adherence ({conf * 100:.1f}%)")
+            else:
+                evidence.append(f"DistilBERT Candidate Probability ({conf * 100:.1f}%)")
+
+            candidates.append(
+                PredictionCandidate(
+                    pattern=pattern_name,
+                    confidence=round(conf, 3),
+                    evidence=evidence,
+                )
+            )
+
+        top_pattern = candidates[0].pattern
+        top_conf = candidates[0].confidence
+    elif _CLASSIFIER is not None and _VECTORIZER is not None and _LABEL_ENCODER is not None:
         query_vec = _VECTORIZER.transform([rich_text])
         probs = _CLASSIFIER.predict_proba(query_vec)[0]
         top_k_indices = np.argsort(probs)[::-1]
@@ -1101,6 +1225,7 @@ def predict_architecture(
         top_pattern=top_pattern,
         subdomains=functional_subdomains,
         query_vector=query_vec,
+        dense_vector=dense_vec,
     )
 
     comparison = ComparisonStatistics(

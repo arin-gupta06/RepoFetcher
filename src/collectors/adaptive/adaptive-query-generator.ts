@@ -49,13 +49,18 @@ export class AdaptiveQueryGenerator {
     const starvedLangs = report.starvedCategories.languages;
     const starvedArchs = report.starvedCategories.architectures;
 
+    const saturatedLangNames = new Set(report.saturatedCategories.languages.map((l) => l.name.toLowerCase()));
+    const saturatedArchNames = new Set(report.saturatedCategories.architectures.map((a) => a.name.toLowerCase()));
+
     // 1. Cross-Product Joint Targeting: Pair Starved Languages with Starved Architectures
     for (const arch of starvedArchs) {
+      if (saturatedArchNames.has(arch.name.toLowerCase())) continue;
       const topic = ARCHITECTURE_TOPIC_MAP[arch.name];
       if (!topic) continue;
 
       for (const lang of starvedLangs) {
         if (!VALID_PROGRAMMING_LANGUAGES.has(lang.name)) continue;
+        if (saturatedLangNames.has(lang.name.toLowerCase())) continue;
 
         const q = `${topic} language:${lang.name} stars:>30`;
         if (seenQueries.has(q)) continue;
@@ -64,7 +69,7 @@ export class AdaptiveQueryGenerator {
         // Highest tier of the pair determines urgency
         const minTierLevel = Math.min(arch.tierLevel, lang.tierLevel) as 1 | 2 | 3 | 4 | 5;
         const urgencyMult = Math.max(arch.urgencyMultiplier, lang.urgencyMultiplier);
-        const jointDeficit = Math.max(1, ADAPTIVE_CONFIG.TARGET_PER_BUCKET - Math.min(arch.count, lang.count));
+        const jointDeficit = Math.max(1, Math.round((arch.deficitRatio + lang.deficitRatio) * 50));
         const priority = Number((urgencyMult * jointDeficit * 2.5).toFixed(2));
 
         rawCandidates.push({
@@ -74,20 +79,21 @@ export class AdaptiveQueryGenerator {
           priorityScore: priority,
           tierLevel: minTierLevel,
           tierName: `Joint ${minTierLevel === 1 ? "Tier 1: Emergency" : "Tier 2: Critical"}`,
-          rationale: `Cross-targeted Water-Filling for starved pair: ${lang.name} (${lang.count} repos) + ${arch.name} (${arch.count} repos)`,
+          rationale: `Cross-targeted Water-Filling for starved pair: ${lang.name} (${(lang.proportion * 100).toFixed(1)}% share) + ${arch.name} (${(arch.proportion * 100).toFixed(1)}% share)`,
         });
       }
     }
 
     // 2. Pure Starved Architecture Targeting (Broad cross-language)
     for (const arch of starvedArchs) {
+      if (saturatedArchNames.has(arch.name.toLowerCase())) continue;
       const topic = ARCHITECTURE_TOPIC_MAP[arch.name];
       if (!topic) continue;
 
       const q = `${topic} stars:>80`;
       if (!seenQueries.has(q)) {
         seenQueries.add(q);
-        const deficit = Math.max(1, ADAPTIVE_CONFIG.TARGET_PER_BUCKET - arch.count);
+        const deficit = Math.max(1, Math.round(arch.deficitRatio * 50));
         const priority = Number((arch.urgencyMultiplier * deficit * 1.8).toFixed(2));
 
         rawCandidates.push({
@@ -96,7 +102,7 @@ export class AdaptiveQueryGenerator {
           priorityScore: priority,
           tierLevel: arch.tierLevel,
           tierName: arch.tierName,
-          rationale: `Water-Filling architecture boost for: ${arch.name} (${arch.count} repos, deficit: ${(arch.deficitRatio * 100).toFixed(0)}%)`,
+          rationale: `Water-Filling architecture boost for minority: ${arch.name} (${arch.count} repos, ${(arch.proportion * 100).toFixed(1)}% share, deficit: ${(arch.deficitRatio * 100).toFixed(0)}%)`,
         });
       }
     }
@@ -104,11 +110,12 @@ export class AdaptiveQueryGenerator {
     // 3. Pure Starved Language Targeting (Curated programming stacks only)
     for (const lang of starvedLangs) {
       if (!VALID_PROGRAMMING_LANGUAGES.has(lang.name)) continue;
+      if (saturatedLangNames.has(lang.name.toLowerCase())) continue;
 
       const q = `language:${lang.name} stars:300..5000`;
       if (!seenQueries.has(q)) {
         seenQueries.add(q);
-        const deficit = Math.max(1, ADAPTIVE_CONFIG.TARGET_PER_BUCKET - lang.count);
+        const deficit = Math.max(1, Math.round(lang.deficitRatio * 50));
         const priority = Number((lang.urgencyMultiplier * deficit * 1.2).toFixed(2));
 
         rawCandidates.push({
@@ -117,7 +124,7 @@ export class AdaptiveQueryGenerator {
           priorityScore: priority,
           tierLevel: lang.tierLevel,
           tierName: lang.tierName,
-          rationale: `Language pool deficit intake for: ${lang.name} (${lang.count} repos, deficit: ${(lang.deficitRatio * 100).toFixed(0)}%)`,
+          rationale: `Language pool deficit intake for minority: ${lang.name} (${lang.count} repos, ${(lang.proportion * 100).toFixed(1)}% share, deficit: ${(lang.deficitRatio * 100).toFixed(0)}%)`,
         });
       }
     }

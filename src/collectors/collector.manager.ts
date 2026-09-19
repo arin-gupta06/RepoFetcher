@@ -28,6 +28,46 @@ import { appendJsonl } from "../storage/json.exporter";
 import { SkewnessAnalyzer } from "./adaptive/skewness-analyzer";
 import { AdaptiveQueryGenerator } from "./adaptive/adaptive-query-generator";
 import { EvidenceValidator } from "./adaptive/evidence-validator";
+import { ADAPTIVE_CONFIG, VALID_PROGRAMMING_LANGUAGES } from "./adaptive/adaptive.config";
+import { promises as fs } from "node:fs";
+import path from "node:path";
+
+const NON_PROGRAMMING_LANGUAGES = new Set([
+  "unknown", "none", "", "html", "css", "scss", "dockerfile", "makefile", "jupyter notebook", "shell", "hcl", "cue"
+]);
+
+let cachedSaturatedLangs: Set<string> | null = null;
+let lastSaturationCheck = 0;
+
+export async function getSaturatedLanguages(): Promise<Set<string>> {
+  const now = Date.now();
+  if (cachedSaturatedLangs && now - lastSaturationCheck < 30000) {
+    return cachedSaturatedLangs;
+  }
+  const saturated = new Set<string>();
+  try {
+    const summaryPath = path.resolve("data/model_ready/dataset_summary.json");
+    const raw = await fs.readFile(summaryPath, "utf-8");
+    const summary = JSON.parse(raw);
+    const langDist: Record<string, number> = summary.languageDistribution || {};
+    const total = summary.totalHarvestedRepos || summary.cleanedSamplesCount || 1;
+    const K = Math.max(1, Object.keys(langDist).length);
+    const targetShare = 1.0 / K;
+    const saturationShare = targetShare * ADAPTIVE_CONFIG.SATURATION_SHARE_RATIO;
+
+    for (const [lang, count] of Object.entries(langDist)) {
+      const share = count / total;
+      if (share >= saturationShare) {
+        saturated.add(lang.toLowerCase());
+      }
+    }
+  } catch {
+    saturated.add("javascript");
+  }
+  cachedSaturatedLangs = saturated;
+  lastSaturationCheck = now;
+  return saturated;
+}
 
 const checkpoint = new CheckpointStore();
 
@@ -98,11 +138,16 @@ export async function runHarvestingPipeline(): Promise<void> {
   }
 
   // -------------------------------------------------------------
-  // Step 4: Ingest Scaled GitHub Sliced Repositories (Tier 4 - Balanced 1 Page per Bracket)
+  // Step 4: Ingest Scaled GitHub Sliced Repositories (Balanced Minority Sample Only)
   // -------------------------------------------------------------
-  console.log("\n🌐 Ingesting Sliced GitHub Candidate Pool by Language (Balanced Sample)...");
+  console.log("\n🌐 Ingesting Sliced GitHub Candidate Pool by Language (Minority Categories Only)...");
+  const saturatedLangs = await getSaturatedLanguages();
   for (const lang of languages) {
-    console.log(`\n🔍 Searching language: ${lang}`);
+    if (saturatedLangs.has(lang.toLowerCase())) {
+      console.log(`   ⏸ [Saturation Stopped] Skipping language '${lang}' (content share quota reached).`);
+      continue;
+    }
+    console.log(`\n🔍 Searching minority language: ${lang}`);
     const repos = await collectGitHubRepositoriesPaged(lang, 1);
 
     for (const repo of repos) {
@@ -176,9 +221,24 @@ export async function runAdaptiveHarvestingPipeline(options?: {
 }
 
 export async function processAndStreamRepository(repository: Repository): Promise<boolean> {
-  console.log(`📦 Processing ${repository.fullName} (${repository.sourceTier})...`);
+  const langLower = (repository.language || "").trim().toLowerCase();
 
-  // 1. Readme
+  // 1. Hygiene Gate: Reject non-code, unknown, or empty languages
+  if (!langLower || NON_PROGRAMMING_LANGUAGES.has(langLower)) {
+    console.log(`   ⚠️ [Hygiene Gate REJECTED] ${repository.fullName}: Invalid or unknown language '${repository.language}'.`);
+    return false;
+  }
+
+  // 2. Saturation Gate: Reject if category has reached saturation content share
+  const saturated = await getSaturatedLanguages();
+  if (saturated.has(langLower)) {
+    console.log(`   ⚠️ [Saturation Gate REJECTED] ${repository.fullName}: Language '${repository.language}' has reached saturation content share. Paused to harvest minorities.`);
+    return false;
+  }
+
+  console.log(`📦 Processing minority candidate ${repository.fullName} (${repository.sourceTier})...`);
+
+  // 3. Readme
   const readme = await collectRepositoryReadme(repository);
   if (readme) {
     repository.readme = readme;

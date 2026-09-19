@@ -11,8 +11,11 @@ import {
   Loader2,
   Lightbulb,
   CheckCircle2,
+  AlertTriangle,
   Sliders,
   Sparkles,
+  Lock,
+  Unlock,
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -137,21 +140,32 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
     "A scalable Go microservice using Gin framework, domain-driven services, repositories for Postgres, and Redis caching. It includes an architecture.md document and handles high concurrency."
   );
 
-  const [githubUrl, setGithubUrl] = useState("");
+  const [githubUrl, setGithubUrl] = useState(
+    initialValues?.repoName ? `https://github.com/${initialValues.repoName}` : ""
+  );
+  const [isLockedByUrl, setIsLockedByUrl] = useState(false);
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectStatus, setDetectStatus] = useState<string | null>(null);
+  const [isErrorStatus, setIsErrorStatus] = useState(false);
   const [statusTimer, setStatusTimer] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (initialValues) {
       setValues((prev) => ({ ...prev, ...initialValues }));
+      if (initialValues.repoName && !githubUrl) {
+        setGithubUrl(`https://github.com/${initialValues.repoName}`);
+      }
     }
   }, [initialValues]);
 
-  const showStatus = (msg: string) => {
+  const showStatus = (msg: string, isError = false) => {
     if (statusTimer) clearTimeout(statusTimer);
     setDetectStatus(msg);
-    const t = setTimeout(() => setDetectStatus(null), 5000);
+    setIsErrorStatus(isError);
+    const t = setTimeout(() => {
+      setDetectStatus(null);
+      setIsErrorStatus(false);
+    }, 6000);
     setStatusTimer(t);
   };
 
@@ -215,51 +229,65 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
   };
 
   const handleGithubDetect = async () => {
-    if (!githubUrl.trim()) return;
+    const rawUrl = githubUrl.trim();
+    if (!rawUrl) return;
     setIsDetecting(true);
     setDetectStatus(null);
+    setIsErrorStatus(false);
 
     try {
-      const resp = await fetch(`${API_BASE}/detect-github`, {
+      const resp = await fetch(`${API_BASE}/detect-repo`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ github_url: githubUrl.trim() }),
+        body: JSON.stringify({ url: rawUrl, github_url: rawUrl }),
       });
 
       if (!resp.ok) {
-        throw new Error(`API returned ${resp.status}`);
+        const errJson = await resp.json().catch(() => ({}));
+        throw new Error(errJson?.detail || `API request failed with HTTP ${resp.status}`);
       }
 
       const data = await resp.json();
       setValues((prev) => ({
         ...prev,
-        repoName: data.repo_name ?? prev.repoName,
-        language: data.language ?? prev.language,
-        frameworks: data.frameworks?.length ? data.frameworks : prev.frameworks,
-        layers: data.layers?.length ? data.layers : prev.layers,
-        stars: data.stars ?? prev.stars,
-        totalFiles: data.total_files ?? prev.totalFiles,
-        hasArchDocs: data.has_arch_docs ?? prev.hasArchDocs,
+        repoName: data.repo_name || prev.repoName,
+        language: data.language || prev.language,
+        frameworks: Array.isArray(data.frameworks) && data.frameworks.length > 0 ? data.frameworks : prev.frameworks,
+        layers: Array.isArray(data.layers) && data.layers.length > 0 ? data.layers : prev.layers,
+        stars: typeof data.stars === "number" ? data.stars : prev.stars,
+        totalFiles: typeof data.total_files === "number" ? data.total_files : prev.totalFiles,
+        hasArchDocs: typeof data.has_arch_docs === "boolean" ? data.has_arch_docs : prev.hasArchDocs,
         readmeSnippet: data.readme_snippet ?? prev.readmeSnippet,
       }));
+
+      // If user provided shorthand slug like "expressjs/express", normalize githubUrl field to full URL
+      if (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://")) {
+        setGithubUrl(`https://github.com/${data.repo_name || rawUrl}`);
+      }
 
       setDialogueText(
         `Repository: ${data.repo_name}\nPrimary Language: ${data.language}\nFrameworks: ${(data.frameworks || []).join(", ")}\nLayers: ${(data.layers || []).join(", ")}\nStars: ${data.stars} | Files: ${data.total_files} | Arch Docs: ${data.has_arch_docs ? "Yes" : "No"}\n\nReadme Summary:\n${data.readme_snippet || "No description provided."}`
       );
 
-      showStatus(`Imported ${data.repo_name} from GitHub!`);
-    } catch {
-      showStatus("Could not fetch repo automatically. You can fill the fields manually.");
+      setIsLockedByUrl(true);
+      showStatus(`Imported ${data.repo_name} from GitHub! Fields populated from URL are now locked.`, false);
+    } catch (err: any) {
+      showStatus(err?.message || "Could not fetch repo metadata. Please verify the URL or slug.", true);
     } finally {
       setIsDetecting(false);
     }
   };
 
   const applyPreset = (preset: (typeof EXAMPLE_REPOS)[0]) => {
+    setIsLockedByUrl(false);
     setValues((prev) => ({ ...prev, ...preset.values }));
+    if (preset.values.repoName) {
+      setGithubUrl(`https://github.com/${preset.values.repoName}`);
+    }
     setDialogueText(
       `Repository: ${preset.values.repoName}\nPrimary Language: ${preset.values.language}\nFrameworks: ${preset.values.frameworks?.join(", ")}\nLayers: ${preset.values.layers?.join(", ")}\nDescription:\n${preset.values.readmeSnippet}`
     );
+    showStatus(`Loaded preset: ${preset.label}`, false);
   };
 
   const insertTagToDialogue = (tag: string) => {
@@ -411,15 +439,15 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
             borderRadius: 8,
             fontSize: "0.8125rem",
             fontWeight: 600,
-            background: "#061510",
-            border: "1px solid #10b981",
-            color: "#34d399",
+            background: isErrorStatus ? "#1a0808" : "#061510",
+            border: `1px solid ${isErrorStatus ? "#ef4444" : "#10b981"}`,
+            color: isErrorStatus ? "#f87171" : "#34d399",
             display: "flex",
             alignItems: "center",
             gap: 8,
           }}
         >
-          <CheckCircle2 size={16} />
+          {isErrorStatus ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           <span>{detectStatus}</span>
         </div>
       )}
@@ -604,13 +632,19 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
               </span>
             </div>
 
-            {/* GitHub Import Bar (Fix Issue 13: Neutral Fetch Button) */}
+            {/* GitHub Import Bar */}
             <div style={{ display: "flex", gap: 8, marginBottom: "0.75rem" }}>
               <input
                 type="text"
                 value={githubUrl}
                 onChange={(e) => setGithubUrl(e.target.value)}
-                placeholder="e.g. https://github.com/expressjs/express"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleGithubDetect();
+                  }
+                }}
+                placeholder="e.g. https://github.com/expressjs/express or tiangolo/fastapi"
                 style={{
                   flex: 1,
                   height: 40,
@@ -628,12 +662,13 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                 type="button"
                 onClick={handleGithubDetect}
                 disabled={isDetecting || !githubUrl.trim()}
+                title={!githubUrl.trim() ? "Enter a repository link or owner/repo slug first" : "Fetch repository architecture metadata"}
                 style={{
                   height: 40,
-                  padding: "0 1.1rem",
+                  padding: "0 1.25rem",
                   borderRadius: 8,
-                  background: "#18181b",
-                  border: "1px solid #3f3f46",
+                  background: isDetecting ? "#2e1065" : githubUrl.trim() ? "#7c3aed" : "#18181b",
+                  border: `1px solid ${githubUrl.trim() ? "#8b5cf6" : "#3f3f46"}`,
                   color: "#ffffff",
                   fontWeight: 700,
                   fontSize: "0.8125rem",
@@ -642,10 +677,12 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                   alignItems: "center",
                   gap: 6,
                   whiteSpace: "nowrap",
+                  opacity: !githubUrl.trim() ? 0.6 : 1,
+                  transition: "all 0.15s ease",
                 }}
               >
                 {isDetecting ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-                <span>Fetch</span>
+                <span>{isDetecting ? "Fetching..." : "Fetch"}</span>
               </button>
             </div>
 
@@ -674,13 +711,74 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                 </button>
               ))}
             </div>
+
+            {/* Locked Notification Banner */}
+            {isLockedByUrl && (
+              <div
+                style={{
+                  marginTop: "0.85rem",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  background: "#130f26",
+                  border: "1px solid #7c3aed",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Lock size={15} color="#c4b5fd" />
+                  <div>
+                    <strong style={{ color: "#ffffff", fontSize: "0.8125rem", display: "block" }}>
+                      Fields Locked to Fetched URL Metadata
+                    </strong>
+                    <span style={{ color: "#a1a1aa", fontSize: "0.75rem" }}>
+                      Populated from {values.repoName || "GitHub"}. The attributes below are unchangeable to preserve fetch integrity.
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsLockedByUrl(false);
+                    showStatus("Fields unlocked for manual modification.", false);
+                  }}
+                  style={{
+                    background: "#241442",
+                    border: "1px solid #8b5cf6",
+                    color: "#ddd6fe",
+                    borderRadius: 6,
+                    padding: "5px 12px",
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <Unlock size={12} />
+                  <span>Unlock to Edit</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Section 2: Repository Identity & Core Tech Stack */}
           <div style={{ background: "#000000", border: "1px solid #27272a", borderRadius: 8, padding: "1rem" }}>
-            <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "#d4d4d8", display: "block", marginBottom: "0.75rem" }}>
-              2. Repository Identity &amp; Frameworks
-            </span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+              <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "#d4d4d8" }}>
+                2. Repository Identity &amp; Frameworks
+              </span>
+              {isLockedByUrl && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.72rem", color: "#c4b5fd", background: "#1f1438", border: "1px solid #7c3aed", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                  <Lock size={11} /> Locked from URL
+                </span>
+              )}
+            </div>
 
             {/* Repo Name & Language (Fix Issue 11: Standardized 40px Height) */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.85rem", marginBottom: "0.85rem" }}>
@@ -690,6 +788,8 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                 </label>
                 <input
                   type="text"
+                  readOnly={isLockedByUrl}
+                  disabled={isLockedByUrl}
                   value={values.repoName}
                   onChange={(e) => setValues({ ...values, repoName: e.target.value })}
                   placeholder="owner/repo-name"
@@ -697,9 +797,10 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                     width: "100%",
                     height: 40,
                     boxSizing: "border-box",
-                    background: "#0c0c10",
-                    border: "1px solid #3f3f46",
-                    color: "#ffffff",
+                    background: isLockedByUrl ? "#121217" : "#0c0c10",
+                    border: `1px solid ${isLockedByUrl ? "#27272a" : "#3f3f46"}`,
+                    color: isLockedByUrl ? "#a1a1aa" : "#ffffff",
+                    cursor: isLockedByUrl ? "not-allowed" : "text",
                     borderRadius: 8,
                     padding: "0 0.75rem",
                     fontSize: "0.85rem",
@@ -713,23 +814,24 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                   Primary Language
                 </label>
                 <select
+                  disabled={isLockedByUrl}
                   value={values.language}
                   onChange={(e) => setValues({ ...values, language: e.target.value })}
                   style={{
                     width: "100%",
                     height: 40,
                     boxSizing: "border-box",
-                    background: "#0c0c10",
-                    border: "1px solid #3f3f46",
-                    color: "#ffffff",
+                    background: isLockedByUrl ? "#121217" : "#0c0c10",
+                    border: `1px solid ${isLockedByUrl ? "#27272a" : "#3f3f46"}`,
+                    color: isLockedByUrl ? "#a1a1aa" : "#ffffff",
+                    cursor: isLockedByUrl ? "not-allowed" : "pointer",
                     borderRadius: 8,
                     padding: "0 0.75rem",
                     fontSize: "0.85rem",
                     outline: "none",
-                    cursor: "pointer",
                   }}
                 >
-                  {LANGUAGES.map((l) => (
+                  {Array.from(new Set([...LANGUAGES, values.language])).filter(Boolean).map((l) => (
                     <option key={l} value={l} style={{ background: "#000000", color: "#f4f4f5" }}>
                       {l}
                     </option>
@@ -745,14 +847,22 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
               onChange={(frameworks) => setValues({ ...values, frameworks })}
               suggestions={FRAMEWORKS}
               placeholder="e.g. Express, NestJS, FastAPI..."
+              disabled={isLockedByUrl}
             />
           </div>
 
           {/* Section 3: Architectural Layers & Signals */}
           <div style={{ background: "#000000", border: "1px solid #27272a", borderRadius: 8, padding: "1rem" }}>
-            <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "#d4d4d8", display: "block", marginBottom: "0.75rem" }}>
-              3. Architectural Layers &amp; Metadata
-            </span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+              <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "#d4d4d8" }}>
+                3. Architectural Layers &amp; Metadata
+              </span>
+              {isLockedByUrl && (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.72rem", color: "#c4b5fd", background: "#1f1438", border: "1px solid #7c3aed", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                  <Lock size={11} /> Locked from URL
+                </span>
+              )}
+            </div>
 
             {/* Layers Tag Input */}
             <div style={{ marginBottom: "0.85rem" }}>
@@ -762,6 +872,7 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                 onChange={(layers) => setValues({ ...values, layers })}
                 suggestions={LAYERS}
                 placeholder="e.g. controllers, services, domain, repositories..."
+                disabled={isLockedByUrl}
               />
             </div>
 
@@ -774,15 +885,18 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                 <input
                   type="number"
                   min="0"
+                  readOnly={isLockedByUrl}
+                  disabled={isLockedByUrl}
                   value={values.stars}
                   onChange={(e) => setValues({ ...values, stars: Math.max(0, parseInt(e.target.value) || 0) })}
                   style={{
                     width: "100%",
                     height: 40,
                     boxSizing: "border-box",
-                    background: "#0c0c10",
-                    border: "1px solid #3f3f46",
-                    color: "#ffffff",
+                    background: isLockedByUrl ? "#121217" : "#0c0c10",
+                    border: `1px solid ${isLockedByUrl ? "#27272a" : "#3f3f46"}`,
+                    color: isLockedByUrl ? "#a1a1aa" : "#ffffff",
+                    cursor: isLockedByUrl ? "not-allowed" : "text",
                     borderRadius: 8,
                     padding: "0 0.75rem",
                     fontSize: "0.85rem",
@@ -798,15 +912,18 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                 <input
                   type="number"
                   min="0"
+                  readOnly={isLockedByUrl}
+                  disabled={isLockedByUrl}
                   value={values.totalFiles}
                   onChange={(e) => setValues({ ...values, totalFiles: Math.max(0, parseInt(e.target.value) || 0) })}
                   style={{
                     width: "100%",
                     height: 40,
                     boxSizing: "border-box",
-                    background: "#0c0c10",
-                    border: "1px solid #3f3f46",
-                    color: "#ffffff",
+                    background: isLockedByUrl ? "#121217" : "#0c0c10",
+                    border: `1px solid ${isLockedByUrl ? "#27272a" : "#3f3f46"}`,
+                    color: isLockedByUrl ? "#a1a1aa" : "#ffffff",
+                    cursor: isLockedByUrl ? "not-allowed" : "text",
                     borderRadius: 8,
                     padding: "0 0.75rem",
                     fontSize: "0.85rem",
@@ -824,21 +941,22 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
                     gap: 8,
                     fontSize: "0.8125rem",
                     fontWeight: 600,
-                    color: "#ffffff",
-                    cursor: "pointer",
+                    color: isLockedByUrl ? "#a1a1aa" : "#ffffff",
+                    cursor: isLockedByUrl ? "not-allowed" : "pointer",
                     height: 40,
                     boxSizing: "border-box",
                     padding: "0 0.85rem",
-                    background: "#0c0c10",
+                    background: isLockedByUrl ? "#121217" : "#0c0c10",
                     borderRadius: 8,
-                    border: "1px solid #3f3f46",
+                    border: `1px solid ${isLockedByUrl ? "#27272a" : "#3f3f46"}`,
                   }}
                 >
                   <input
                     type="checkbox"
+                    disabled={isLockedByUrl}
                     checked={values.hasArchDocs}
                     onChange={(e) => setValues({ ...values, hasArchDocs: e.target.checked })}
-                    style={{ accentColor: "#7c3aed", width: 16, height: 16 }}
+                    style={{ accentColor: "#7c3aed", width: 16, height: 16, cursor: isLockedByUrl ? "not-allowed" : "pointer" }}
                   />
                   <span>Has Arch Docs</span>
                 </label>
@@ -852,20 +970,23 @@ export default function RepoForm({ onSubmit, isLoading, initialValues }: RepoFor
               </label>
               <textarea
                 rows={3}
+                readOnly={isLockedByUrl}
+                disabled={isLockedByUrl}
                 value={values.readmeSnippet}
                 onChange={(e) => setValues({ ...values, readmeSnippet: e.target.value })}
                 placeholder="Paste repository summary or README excerpt..."
                 style={{
                   width: "100%",
                   boxSizing: "border-box",
-                  background: "#0c0c10",
-                  border: "1px solid #3f3f46",
-                  color: "#ffffff",
+                  background: isLockedByUrl ? "#121217" : "#0c0c10",
+                  border: `1px solid ${isLockedByUrl ? "#27272a" : "#3f3f46"}`,
+                  color: isLockedByUrl ? "#a1a1aa" : "#ffffff",
+                  cursor: isLockedByUrl ? "not-allowed" : "text",
                   borderRadius: 8,
                   padding: "0.6rem 0.75rem",
                   fontSize: "0.82rem",
                   outline: "none",
-                  resize: "vertical",
+                  resize: isLockedByUrl ? "none" : "vertical",
                 }}
               />
             </div>
