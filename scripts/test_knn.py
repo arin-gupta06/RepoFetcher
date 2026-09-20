@@ -9,6 +9,10 @@ sys.path.insert(0, str(Path(r"d:\RepoFetcher\api").resolve()))
 import model
 model._init_models()
 
+dense_matrix = model._REPO_EMBEDDINGS_DENSE
+if dense_matrix is None:
+    raise RuntimeError("Model dense embeddings not loaded.")
+
 test_cases = [
     ("FastAPI Microservices", "Python", ["FastAPI"], ["handlers", "services", "models", "infrastructure"], "Distributed microservices architecture with FastAPI and async messaging"),
     ("NestJS Clean Arch", "TypeScript", ["NestJS"], ["controllers", "services", "repositories", "domain", "ports", "adapters"], "Clean Architecture and Domain-Driven Design in NestJS with hexagonal ports"),
@@ -26,7 +30,9 @@ for title, lang, fws, layers, readme in test_cases:
         has_arch_docs=False,
     )
     vec = model.extract_dense_embedding(txt)
-    sims = model._REPO_EMBEDDINGS_DENSE.dot(vec)
+    if vec is None:
+        continue
+    sims = dense_matrix.dot(vec)
     top_idx = np.argsort(sims)[::-1][:10]
     
     print(f"\n==================== {title} ====================")

@@ -1,14 +1,17 @@
 import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import json
+from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
 from transformers import AutoTokenizer, AutoModel
 
 p = r"models\distilbert"
-tok = AutoTokenizer.from_pretrained(p, local_files_only=True)
-mod = AutoModel.from_pretrained(p, local_files_only=True)
+tok: Any = AutoTokenizer.from_pretrained(p, local_files_only=True)
+if tok is None:
+    raise RuntimeError(f"Failed to load tokenizer from {p}")
+mod: Any = AutoModel.from_pretrained(p, local_files_only=True)
 mod.eval()
 
 with open(r"models\distilbert\architecture_config.json") as f:

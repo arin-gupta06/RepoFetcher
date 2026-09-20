@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from typing import TypedDict
 
 # Fix Windows OpenMP and encoding
 import os
@@ -10,7 +11,18 @@ if hasattr(sys.stdout, "reconfigure"):
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "api"))
 from model import predict_architecture
 
-test_cases = [
+
+class TestCase(TypedDict):
+    name: str
+    lang: str
+    fws: list[str]
+    layers: list[str]
+    readme: str
+    stars: int
+    expected: str
+
+
+test_cases: list[TestCase] = [
     {
         "name": "NestJS Clean Architecture",
         "lang": "TypeScript",
