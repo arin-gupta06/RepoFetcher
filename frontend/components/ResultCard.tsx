@@ -133,8 +133,8 @@ export default function ResultCard({
           <p style={{ color: "#ffffff", fontWeight: 800, fontSize: "1.1rem", marginBottom: 6 }}>
             Ready to Analyze Architecture
           </p>
-          <p style={{ color: "#a1a1aa", fontSize: "0.85rem", maxWidth: 420, margin: "0 auto 1.25rem", lineHeight: 1.5 }}>
-            Provide repository layers, frameworks, and context on the left or use dialogue mode to extract architecture patterns and benchmark matches.
+          <p style={{ color: "#a1a1aa", fontSize: "0.85rem", maxWidth: 460, margin: "0 auto 1.25rem", lineHeight: 1.5 }}>
+            Provide repository layers, frameworks, and context in Architecture Controls above or use dialogue mode to extract architecture patterns and benchmark matches.
           </p>
           {/* Fix Issue 3: Added interactive Primary CTA button */}
           {onTrySample && (

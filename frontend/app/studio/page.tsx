@@ -197,7 +197,7 @@ function StudioContent() {
     <div style={{ minHeight: "100vh", background: "#000000" }}>
       <Navbar />
 
-      <main style={{ maxWidth: 1440, margin: "0 auto", padding: "1.5rem 1.5rem 5rem" }}>
+      <main style={{ maxWidth: 1200, margin: "0 auto", padding: "1.5rem 1.25rem 5rem" }}>
         {/* ── Studio Header Bar (Fix Issue 5, 9, 10, 15) ── */}
         <div
           style={{
@@ -333,17 +333,18 @@ function StudioContent() {
         )}
 
         {/* ───────────────────────────────────────────────────────────── */}
-        {/* TWO-COLUMN STUDIO WORKSPACE GRID                             */}
+        {/* VERTICAL STUDIO WORKSPACE FLOW                                */}
+        {/* 1. Architecture Controls (Top)                                */}
+        {/* 2. Ready to Analyze Architecture Box / Results (Bottom)       */}
         {/* ───────────────────────────────────────────────────────────── */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(480px, 1fr))",
-            gap: "1.5rem",
-            alignItems: "start",
+            display: "flex",
+            flexDirection: "column",
+            gap: "2rem",
           }}
         >
-          {/* ── LEFT COLUMN: INPUT CONTROL DECK ──────────────────────── */}
+          {/* ── TOP: ARCHITECTURE CONTROLS / INPUT DECK ────────────────── */}
           <div>
             {activeTab === "analyzer" ? (
               <div>
@@ -398,7 +399,7 @@ function StudioContent() {
             )}
           </div>
 
-          {/* ── RIGHT COLUMN: LIVE OUTPUT & INTELLIGENCE DECK ─────────── */}
+          {/* ── BOTTOM: READY TO ANALYZE BOX & INTELLIGENCE DECK ───────── */}
           <div>
             {activeTab === "analyzer" ? (
               <div>
@@ -483,45 +484,30 @@ function StudioContent() {
                     </div>
 
                     {/* Repo Match Cards Grid */}
-                    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))",
+                        gap: "1.25rem",
+                        alignItems: "stretch",
+                      }}
+                    >
                       {ideaResult.matches.map((match, idx) => (
-                        <div key={match.repo_name} style={{ position: "relative" }}>
-                          <RepoMatchCard
-                            rank={idx + 1}
-                            repo_name={match.repo_name}
-                            github_url={match.github_url}
-                            language={match.language}
-                            stars={match.stars}
-                            architecture_pattern={match.architecture_pattern}
-                            detected_signals={match.detected_signals}
-                            match_pct={match.match_pct}
-                            rationale={match.rationale}
-                            source_tier={match.source_tier}
-                            animDelay={idx * 40}
-                          />
-                          <div style={{ marginTop: "-0.5rem", marginBottom: "0.5rem", paddingLeft: "1.25rem" }}>
-                            <button
-                              type="button"
-                              onClick={() => handleTransferToAnalyzer(match)}
-                              style={{
-                                background: "#1e1136",
-                                border: "1px solid #7c3aed",
-                                color: "#ddd6fe",
-                                fontSize: "0.8125rem",
-                                fontWeight: 700,
-                                padding: "6px 14px",
-                                borderRadius: 6,
-                                cursor: "pointer",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 6,
-                              }}
-                            >
-                              <Zap size={13} />
-                              <span>Deep Analyze in Studio</span>
-                            </button>
-                          </div>
-                        </div>
+                        <RepoMatchCard
+                          key={match.repo_name}
+                          rank={idx + 1}
+                          repo_name={match.repo_name}
+                          github_url={match.github_url}
+                          language={match.language}
+                          stars={match.stars}
+                          architecture_pattern={match.architecture_pattern}
+                          detected_signals={match.detected_signals}
+                          match_pct={match.match_pct}
+                          rationale={match.rationale}
+                          source_tier={match.source_tier}
+                          animDelay={idx * 40}
+                          onDeepAnalyze={() => handleTransferToAnalyzer(match)}
+                        />
                       ))}
                     </div>
                   </div>
@@ -559,7 +545,7 @@ function StudioContent() {
                         Explore Curated Architectural Paradigms
                       </p>
                       <p style={{ color: "#a1a1aa", fontSize: "0.85rem", maxWidth: 380, margin: "0 auto", lineHeight: 1.5 }}>
-                        Enter a project concept on the left or select an example prompt to retrieve matching open-source reference implementations.
+                        Enter a project concept above or select an example prompt to retrieve matching open-source reference implementations.
                       </p>
                     </div>
                   </div>
