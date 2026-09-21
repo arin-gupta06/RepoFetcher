@@ -1,159 +1,128 @@
-# RepoFetcher
+# RepoLens AI (RepoFetcher)
 
-**RepoFetcher** is a TypeScript-based data repository that powers **RepoLens**.  
-It serves as a structured, version-controlled source of repository intelligence data that can be consumed by RepoLens for analysis, visualization, and insights.
-
----
-
-## Overview
-
-RepoFetcher is intended to store and maintain data used by RepoLens in a clean and maintainable format.  
-Instead of keeping runtime data scattered across services, this repository provides a central location for:
-
-- curated repository metadata,
-- language and ecosystem breakdowns,
-- and supporting data artifacts used in RepoLens workflows.
-
-This approach makes data updates transparent, reviewable, and easy to track over time.
+**RepoLens** is an AI-powered software architecture intelligence platform. It analyzes repository structure, signals, and dependencies to predict architectural patterns, compare against curated benchmarks, detect structural gaps, and suggest flow improvements.
 
 ---
 
-## Tech Stack
+## Architecture Overview
 
-- **Language:** TypeScript (100%)
-- **Runtime:** Node.js (recommended for local scripts/utilities)
-- **Purpose:** Data backing for RepoLens
-
----
-
-## Repository Goals
-
-- Keep RepoLens data **organized and auditable**
-- Enable **consistent updates** through Git commits
-- Make changes **review-friendly** via pull requests
-- Support future automation for scheduled or triggered data refreshes
-
----
-
-## Suggested Project Structure
-
-> The exact structure may evolve, but a recommended layout is:
+The repository is organized into three production-ready layers:
 
 ```text
 RepoFetcher/
-├─ data/                 # Raw or normalized dataset files
-├─ src/                  # TypeScript scripts/utilities for data processing
-├─ scripts/              # CLI or helper automation scripts
-├─ package.json          # Dependencies and script definitions
-├─ tsconfig.json         # TypeScript configuration
-└─ README.md             # Project documentation
+├── api/                   # FastAPI Python backend (inference, similarity search, signals)
+│   ├── main.py            # API routing, telemetry, CORS, and endpoints
+│   ├── model.py           # DistilBERT transformer & nearest-neighbor semantic matcher
+│   ├── idea_analyzer.py   # Project idea to architecture pattern & repository matcher
+│   ├── github_detector.py # Live GitHub repository signal inspection
+│   └── requirements.txt   # Python production dependencies
+├── frontend/              # Next.js 16 (Turbopack + TailwindCSS) Web UI
+│   ├── app/               # Next.js App Router (Studio, Explore, Dashboard)
+│   ├── components/        # Architecture visualization & interactive components
+│   └── package.json       # Frontend dependencies & scripts
+├── src/                   # TypeScript dataset harvesting & adaptive balancing pipeline
+│   ├── collectors/        # GitHub, Kaggle, and Web collectors
+│   ├── cleaners/          # Feature normalizers and formatters
+│   └── pipelines/         # Automated data cleaning & pruning
+├── models/                # Production model weights, dense embeddings, & tokenizer
+├── data/                  # Curated runtime datasets & architecture diagrams
+├── Dockerfile             # Production Dockerfile for FastAPI backend
+├── docker-compose.yml     # Multi-container orchestration (API + Frontend)
+└── Procfile               # PaaS deployment specification (Render, Railway, Heroku)
 ```
 
 ---
 
-## Getting Started
+## Deployment Guide
 
-### Prerequisites
+### Option 1: Docker Compose (Full Stack)
 
-- Node.js 18+ (recommended)
-- npm / pnpm / yarn
-
-### Installation
+Deploy both the FastAPI backend and Next.js frontend together:
 
 ```bash
-git clone https://github.com/arin-gupta06/RepoFetcher.git
-cd RepoFetcher
+docker compose up --build -d
+```
+
+- **Frontend UI:** `http://localhost:3000`
+- **FastAPI Docs:** `http://localhost:8000/docs`
+- **Health Check:** `http://localhost:8000/health`
+
+---
+
+### Option 2: Cloud PaaS (Render / Railway / Fly.io / Heroku)
+
+#### 1. Deploy API (Python Backend)
+- **Root Directory:** `./`
+- **Build Command:** `pip install -r api/requirements.txt`
+- **Start Command:** `uvicorn api.main:app --host 0.0.0.0 --port $PORT` (or uses root `Procfile`)
+- **Environment Variables:**
+  - `PORT`: (set by host, defaults to 8000)
+  - `CORS_ORIGINS`: `https://your-frontend-domain.vercel.app` (or `*`)
+  - `GITHUB_TOKEN`: (optional, avoids GitHub rate-limits for `/detect-repo`)
+
+#### 2. Deploy Frontend (Vercel / Netlify)
+- **Root Directory:** `frontend`
+- **Framework Preset:** Next.js
+- **Build Command:** `npm run build`
+- **Environment Variables:**
+  - `NEXT_PUBLIC_API_URL`: `https://your-api-domain.onrender.com`
+
+---
+
+### Option 3: Local Development
+
+#### 1. Backend (FastAPI)
+```bash
+# Install Python dependencies
+pip install -r api/requirements.txt
+
+# Start API server
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+#### 2. Frontend (Next.js)
+```bash
+cd frontend
 npm install
-```
-
-### Run (example)
-
-If your project includes scripts in `package.json`, use:
-
-```bash
-npm run build
-npm run start
-```
-
-or for development:
-
-```bash
 npm run dev
 ```
 
-> Update script names based on your actual `package.json`.
+#### 3. Harvesting Pipeline (TypeScript)
+```bash
+npm install
+npm run dev
+```
 
 ---
 
-## Data Usage in RepoLens
+## Environment Variables
 
-RepoLens can consume this repository as a data source for:
+### Backend (`api/.env`)
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `8000` | HTTP port for uvicorn server |
+| `HOST` | `0.0.0.0` | Host binding address |
+| `CORS_ORIGINS` | `http://localhost:3000` | Allowed comma-separated origins or `*` |
+| `GITHUB_TOKEN` | *(optional)* | Personal access token for live repo inspections |
 
-- repository-level summaries,
-- language composition insights,
-- trend tracking over time,
-- and supporting UI visualizations.
-
-Because the data lives in Git, every update has:
-- traceable history,
-- clear diff visibility,
-- and rollback capability when needed.
-
----
-
-## Workflow Recommendations
-
-1. Create or update data artifacts/scripts.
-2. Validate data consistency locally.
-3. Open a pull request with a clear change summary.
-4. Merge after review.
-5. Tag releases for meaningful data milestones (optional).
+### Frontend (`frontend/.env.local`)
+| Variable | Default | Description |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Base URL of the deployed FastAPI backend |
 
 ---
 
-## Contribution Guidelines
+## Key API Endpoints
 
-Contributions are welcome. To keep the repository consistent:
-
-- Prefer small, focused PRs.
-- Include a short rationale for data changes.
-- Keep naming conventions predictable.
-- Avoid committing secrets or sensitive tokens.
-
----
-
-## Versioning
-
-Even for data-centric repositories, semantic tagging can help downstream consumers:
-
-- `v1.0.0` — initial stable dataset contract
-- `v1.1.0` — backward-compatible data additions
-- `v2.0.0` — breaking schema changes
-
----
-
-## Security Notes
-
-- Do not commit API keys or credentials.
-- Use environment variables for any fetch/transform scripts that require tokens.
-- If sensitive data is accidentally committed, rotate credentials immediately and rewrite history if required.
+- `GET /health` — Service health and version status.
+- `GET /stats` — Dataset summary metrics and real-time entropy/symmetry score.
+- `POST /predict` — Predict architectural pattern from repository layers, language, frameworks, and README.
+- `POST /detect-repo` — Automatically inspect a GitHub repository URL and return detected structure.
+- `POST /analyze-idea` — Match free-text project ideas to similar architectural implementations.
+- `GET /dataset/symmetry` — Dataset skewness and category deficit analytics.
 
 ---
 
 ## License
 
-Add a license file appropriate to your use case (for example: MIT, Apache-2.0, or proprietary internal use).
-
----
-
-## Maintainer
-
-**Arin Gupta**  
-GitHub: [@arin-gupta06](https://github.com/arin-gupta06)
-
----
-
-If you’d like, I can also generate:
-- a matching **`CONTRIBUTING.md`**,
-- a **`LICENSE`** template (MIT/Apache),
-- and a cleaner **`package.json scripts`** section to align with this README.
+ISC License.

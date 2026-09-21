@@ -33,14 +33,22 @@ app = FastAPI(
     version="1.0.0",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+if cors_origins_env:
+    allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+    allow_credentials = "*" not in allowed_origins
+else:
+    allowed_origins = [
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
-    ],
-    allow_credentials=True,
+    ]
+    allow_credentials = True
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -508,3 +516,10 @@ def analyze_idea_endpoint(req: IdeaRequest) -> IdeaAnalysisResponse:
             open(Path(__file__).parent.parent / "data" / "model_ready" / "cleaned_repository_samples.jsonl", encoding="utf-8")
         )) if (Path(__file__).parent.parent / "data" / "model_ready" / "cleaned_repository_samples.jsonl").exists() else 0,
     )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    host = os.getenv("HOST", "0.0.0.0")
+    uvicorn.run("main:app", host=host, port=port, reload=False)

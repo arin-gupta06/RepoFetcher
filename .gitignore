@@ -1,9 +1,13 @@
 # Dependencies
 /node_modules/
+frontend/node_modules/
 
 # Production / Build Output
 /dist/
 *.tsbuildinfo
+.next/
+frontend/.next/
+frontend/out/
 
 # Environment & Sensitive Credentials
 .env
@@ -39,14 +43,20 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Large Model Weights (> 100MB exceeds GitHub push limit)
+# Jupyter Checkpoints
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+
+# Model Weights & Plots
 *.safetensors
 *.bin
 models/distilbert/*.safetensors
 models/distilbert_base/
+models/*.png
 
 # Python Cache
 __pycache__/
 *.py[cod]
 *$py.class
 api/__pycache__/
+scripts/__pycache__/
