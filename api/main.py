@@ -34,23 +34,21 @@ app = FastAPI(
 )
 
 cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
-if cors_origins_env:
+if cors_origins_env and cors_origins_env != "*":
     allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-    allow_credentials = "*" not in allowed_origins
-else:
-    allowed_origins = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-    ]
     allow_credentials = True
+else:
+    allowed_origins = ["*"]
+    allow_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?:\/\/.*",
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Path to dataset summary (relative to repo root from api/)

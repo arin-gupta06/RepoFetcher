@@ -261,29 +261,37 @@ def _init_models():
 
         # 2. Load DistilBERT tokenizer, model, and classification head
         if DISTILBERT_DIR.exists():
-            arch_cfg_path = DISTILBERT_DIR / "architecture_config.json"
-            if arch_cfg_path.exists():
-                with open(arch_cfg_path, encoding="utf-8") as f:
-                    _DISTILBERT_CONFIG = json.load(f)
+            try:
+                arch_cfg_path = DISTILBERT_DIR / "architecture_config.json"
+                if arch_cfg_path.exists():
+                    with open(arch_cfg_path, encoding="utf-8") as f:
+                        _DISTILBERT_CONFIG = json.load(f)
 
-            from transformers import AutoTokenizer, AutoModel
+                safetensors_path = DISTILBERT_DIR / "model.safetensors"
+                enable_download = os.getenv("ENABLE_TRANSFORMER_DOWNLOAD", "false").lower() == "true"
 
-            safetensors_path = DISTILBERT_DIR / "model.safetensors"
-            model_target = str(DISTILBERT_DIR) if safetensors_path.exists() else "distilbert-base-uncased"
-            local_only = safetensors_path.exists()
+                # On free cloud hosting (e.g. Render 512MB RAM), avoid blocking 268MB downloads during requests
+                if safetensors_path.exists() or enable_download:
+                    from transformers import AutoTokenizer, AutoModel
+                    model_target = str(DISTILBERT_DIR) if safetensors_path.exists() else "distilbert-base-uncased"
+                    local_only = safetensors_path.exists()
 
-            _DISTILBERT_TOKENIZER = AutoTokenizer.from_pretrained(model_target, local_files_only=local_only)
-            _DISTILBERT_MODEL = AutoModel.from_pretrained(model_target, local_files_only=local_only)
-            _DISTILBERT_MODEL.eval()
+                    _DISTILBERT_TOKENIZER = AutoTokenizer.from_pretrained(model_target, local_files_only=local_only)
+                    _DISTILBERT_MODEL = AutoModel.from_pretrained(model_target, local_files_only=local_only)
+                    _DISTILBERT_MODEL.eval()
 
-            head_path = DISTILBERT_DIR / "classifier_head.pt"
-            if head_path.exists() and _DISTILBERT_CONFIG:
-                num_classes = _DISTILBERT_CONFIG.get("num_classes", 40)
-                head = ArchitectureClassifierHead(in_features=768, hidden_dim=256, num_classes=num_classes)
-                head.load_state_dict(torch.load(head_path, map_location="cpu"))
-                head.eval()
-                _DISTILBERT_CLASSIFIER_HEAD = head
-                print(f"[Model] Loaded DistilBERT architecture classifier head ({num_classes} classes).")
+                    head_path = DISTILBERT_DIR / "classifier_head.pt"
+                    if head_path.exists() and _DISTILBERT_CONFIG:
+                        num_classes = _DISTILBERT_CONFIG.get("num_classes", 40)
+                        head = ArchitectureClassifierHead(in_features=768, hidden_dim=256, num_classes=num_classes)
+                        head.load_state_dict(torch.load(head_path, map_location="cpu"))
+                        head.eval()
+                        _DISTILBERT_CLASSIFIER_HEAD = head
+                        print(f"[Model] Loaded DistilBERT architecture classifier head ({num_classes} classes).")
+                else:
+                    print("[Model] Transformer download skipped for free-tier performance. Using fast calibrated TF-IDF classifier.")
+            except Exception as te:
+                print(f"[Model] Transformer initialization fallback: {te}. Using calibrated TF-IDF classifier.")
 
     except Exception as e:
         print(f"[Warning] Failed to load semantic model artifacts: {e}")
