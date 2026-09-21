@@ -20,10 +20,14 @@ kaggle.json
 secrets/
 
 # Large Datasets & Harvested Stores (Prevent Git Bloat)
-/data/
 /archive/
-*.jsonl
 checkpoints.json
+/data/*
+!/data/diagrams.jsonl
+!/data/model_ready/
+/data/model_ready/*
+!/data/model_ready/dataset_summary.json
+!/data/model_ready/cleaned_repository_samples.jsonl
 
 # Legacy Data Files
 datasets.json
